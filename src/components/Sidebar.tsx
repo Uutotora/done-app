@@ -299,7 +299,7 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
         />
         <Tooltip content={floating ? t('nav.pin') : t('nav.collapse')} shortcut={`${modKey()} \\`}>
           <IconButton
-            className="opacity-0 transition-[opacity,transform] duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 hover:-translate-x-px"
+            className="opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 hover:-translate-x-px"
             onClick={() => {
               if (mobile) setMobileOpen(false);
               else if (floating) {
@@ -441,7 +441,7 @@ function Section({
       size="xs"
       onClick={onAdd}
       label={addLabel}
-      className="translate-x-1 opacity-0 transition-[opacity,transform,background-color] duration-150 group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:translate-x-0 group-focus-within/sec:opacity-100 data-[state=open]:translate-x-0 data-[state=open]:opacity-100"
+      className="translate-x-1 opacity-0 transition-[opacity,transform,background-color,translate,scale,rotate] duration-150 group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:translate-x-0 group-focus-within/sec:opacity-100 data-[state=open]:translate-x-0 data-[state=open]:opacity-100"
     >
       <Plus size={14} />
     </IconButton>
@@ -458,7 +458,7 @@ function Section({
           <ChevronRight
             size={12}
             className={cn(
-              '-translate-x-0.5 opacity-0 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:opacity-100',
+              '-translate-x-0.5 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:opacity-100',
               !collapsed && 'rotate-90',
             )}
           />
@@ -543,7 +543,7 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
     <span className="relative flex h-5 w-5 shrink-0 items-center justify-center text-fg-3">
       <span
         className={cn(
-          'flex items-center justify-center transition-[opacity,transform] duration-150 ease-out',
+          'flex items-center justify-center transition-[opacity,transform,translate,scale,rotate] duration-150 ease-out',
           expandable ? 'group-hover/row:scale-75 group-hover/row:opacity-0 group-focus-within/row:opacity-0' : 'group-hover/row:scale-110',
         )}
       >
@@ -558,7 +558,7 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
             e.stopPropagation();
             onToggle?.();
           }}
-          className="absolute inset-0 flex scale-75 items-center justify-center rounded opacity-0 transition-[opacity,transform,background-color] duration-150 ease-out hover:bg-active group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:scale-100 group-focus-within/row:opacity-100"
+          className="absolute inset-0 flex scale-75 items-center justify-center rounded opacity-0 transition-[opacity,transform,background-color,translate,scale,rotate] duration-150 ease-out hover:bg-active group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:scale-100 group-focus-within/row:opacity-100"
         >
           <ChevronRight
             size={14}
@@ -573,7 +573,7 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
 function RowActions({ children }: { children: ReactNode }) {
   return (
     <span
-      className="flex translate-x-1.5 items-center gap-0.5 opacity-0 transition-[opacity,transform] duration-150 ease-out group-hover/row:translate-x-0 group-hover/row:opacity-100 group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100 has-[[data-state=open]]:translate-x-0 has-[[data-state=open]]:opacity-100 [&>*]:hover:bg-active"
+      className="flex translate-x-1.5 items-center gap-0.5 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 ease-out group-hover/row:translate-x-0 group-hover/row:opacity-100 group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100 has-[[data-state=open]]:translate-x-0 has-[[data-state=open]]:opacity-100 [&>*]:hover:bg-active"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -713,7 +713,7 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
           >
             <button
               onClick={(e) => e.stopPropagation()}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-[background-color,transform] duration-150 hover:bg-active group-hover/row:scale-105"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-active group-hover/row:scale-105"
             >
               <PageIcon icon={group.icon} size={16} />
             </button>
@@ -734,7 +734,7 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
               <ChevronDown
                 size={13}
                 className={cn(
-                  'shrink-0 text-fg-4 transition-[transform,color] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/row:text-fg-3',
+                  'shrink-0 text-fg-4 transition-[transform,color,translate,scale,rotate] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/row:text-fg-3',
                   !expanded && '-rotate-90',
                 )}
               />

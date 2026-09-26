@@ -1,4 +1,4 @@
-import { CheckCheck, ListTodo, Plus, Search, X } from 'lucide-react';
+import { CheckCheck, ChevronDown, FolderOpen, ListTodo, Plus, Search, X } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
@@ -14,6 +14,7 @@ import { Avatar, DoneCheck, PageIcon } from '@/components/ui/bits';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 import { PersonPicker, PriorityPicker } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
+import { EntriesMenu } from '@/components/ui/Overlay';
 
 export function MyWork() {
   const t = useT();
@@ -94,19 +95,38 @@ export function MyWork() {
               </button>
             ))}
           </div>
-          <select
-            aria-label={t('prop.project')}
-            value={projectId}
-            onChange={(e) => change({ project: e.target.value })}
-            className="h-8 max-w-[210px] rounded-md border border-line bg-bg px-2 text-[13px]"
-          >
-            <option value="">{t('work.allProjects')}</option>
-            {projectList.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name || t('project.untitled')}
-              </option>
-            ))}
-          </select>
+          <EntriesMenu
+            trigger={
+              <button
+                aria-label={t('prop.project')}
+                className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-md border border-line px-2.5 text-[13px] transition-colors hover:bg-hover data-[state=open]:bg-hover"
+              >
+                {projectId && projects[projectId] ? (
+                  <>
+                    <PageIcon icon={projects[projectId].icon} size={14} />
+                    <span className="truncate">{projects[projectId].name || t('project.untitled')}</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderOpen size={14} className="text-fg-3" />
+                    <span>{t('work.allProjects')}</span>
+                  </>
+                )}
+                <ChevronDown size={13} className="shrink-0 text-fg-3" />
+              </button>
+            }
+            entries={[
+              { key: 'all', icon: <FolderOpen size={15} />, label: t('work.allProjects'), checked: !projectId, onSelect: () => change({ project: '' }) },
+              { key: 's', separator: true },
+              ...projectList.map((p) => ({
+                key: p.id,
+                icon: <PageIcon icon={p.icon} size={15} />,
+                label: p.name || t('project.untitled'),
+                checked: projectId === p.id,
+                onSelect: () => change({ project: p.id }),
+              })),
+            ]}
+          />
           <div className="relative ml-auto flex items-center">
             <Search size={14} className="absolute left-2 text-fg-4" />
             <input

@@ -791,6 +791,11 @@ const ru = {
   'sprint.progressLabel': 'Прогресс',
   'sprint.workload': 'Нагрузка в спринте',
   'sprint.avg': 'Среднее {n}',
+  'shortcuts.goInbox': 'Перейти во входящие',
+  'shortcuts.goMyWork': 'Перейти в мои задачи',
+  'shortcuts.goHome': 'Перейти на главную',
+  'shortcuts.inboxActions': 'Во входящих: в архив, непрочитано',
+  'home.activeSprints': 'Активные спринты',
 };
 
 export type TKey = keyof typeof ru;
@@ -1547,6 +1552,11 @@ const en: Dict = {
   'sprint.progressLabel': 'Progress',
   'sprint.workload': 'Sprint workload',
   'sprint.avg': 'Average {n}',
+  'shortcuts.goInbox': 'Go to inbox',
+  'shortcuts.goMyWork': 'Go to my tasks',
+  'shortcuts.goHome': 'Go home',
+  'shortcuts.inboxActions': 'Inbox: archive, unread',
+  'home.activeSprints': 'Active sprints',
 };
 
 const dicts: Record<Lang, Dict> = { ru, en };

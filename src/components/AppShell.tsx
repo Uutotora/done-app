@@ -7,6 +7,7 @@ import { useHotkey, useIsDark } from '@/lib/hooks';
 import { reportPresence, useAuth } from '@/lib/auth';
 import { notificationHeadline, notificationTarget, unreadCount } from '@/lib/inbox';
 import { toast } from '@/lib/ui';
+import { isEditableTarget } from '@/lib/utils';
 import { SyncNotice } from './AccountStatus';
 import { Sidebar } from './Sidebar';
 import { Toaster } from './Toaster';
@@ -62,6 +63,7 @@ export function AppShell() {
     ui.openCreateItem(projectMatch ? { projectId: projectMatch.params.projectId } : undefined);
   });
   useHotkey('shift+?', () => ui.setShortcuts(true));
+  useGoTo();
 
   useInboxSignals();
 
@@ -126,5 +128,29 @@ function useInboxSignals() {
         },
       });
     });
+  }, [navigate]);
+}
+
+/** Two-key navigation like Linear: G then I opens the inbox, G then M my tasks, and so on. */
+const GO_TO: Record<string, string> = { i: '/inbox', m: '/my-work', h: '/', c: '/calendar', r: '/roadmap', f: '/files', s: '/settings' };
+function useGoTo() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let armed = 0;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat || isEditableTarget(e.target)) return;
+      if (document.querySelector('[role="dialog"], [data-radix-popper-content-wrapper]')) return;
+      const key = e.key.toLowerCase();
+      if (armed && Date.now() - armed < 1200 && GO_TO[key]) {
+        e.preventDefault();
+        armed = 0;
+        navigate(GO_TO[key]);
+        return;
+      }
+      armed = key === 'g' ? Date.now() : 0;
+    };
+    // Capture phase, so "G C" is not also read as the "C" (new task) shortcut.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [navigate]);
 }

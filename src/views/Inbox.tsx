@@ -64,6 +64,8 @@ export function InboxView() {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    // Leave ⌘K, ⌘\ and other global shortcuts alone.
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     const n = list[focus];
     if (e.key === 'ArrowDown' || e.key === 'j') {
       e.preventDefault();
@@ -226,7 +228,7 @@ function InboxRow({
       <span
         aria-hidden
         className={cn(
-          'absolute left-0 top-[22px] h-1.5 w-1.5 rounded-full bg-accent transition-[opacity,transform] duration-200',
+          'absolute left-0 top-[22px] h-1.5 w-1.5 rounded-full bg-accent transition-[opacity,transform,translate,scale,rotate] duration-200',
           unread ? 'scale-100 opacity-100' : 'scale-0 opacity-0',
         )}
       />
@@ -257,7 +259,7 @@ function InboxRow({
         )}
       </div>
       <div
-        className="absolute right-2 top-2 flex translate-x-1 items-center gap-0.5 rounded-md bg-elevated opacity-0 shadow-sm transition-[opacity,transform] duration-150 group-hover/inbox:translate-x-0 group-hover/inbox:opacity-100 group-focus-within/inbox:translate-x-0 group-focus-within/inbox:opacity-100"
+        className="absolute right-2 top-2 flex translate-x-1 items-center gap-0.5 rounded-md bg-elevated opacity-0 shadow-sm transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/inbox:translate-x-0 group-hover/inbox:opacity-100 group-focus-within/inbox:translate-x-0 group-focus-within/inbox:opacity-100"
         onClick={(e) => e.stopPropagation()}
       >
         {!n.archivedAt && (

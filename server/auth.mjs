@@ -45,26 +45,47 @@ export function createAuthApi({
       /* the socket is closing */
     }
   };
-  const projectOfPath = (path, state) => {
+  // Which project a task or page belongs to, rebuilt only when the workspace revision changes.
+  let pathIndex = { revision: -1, items: new Map(), docs: new Map() };
+  const currentPathIndex = () => {
+    const row = db.prepare('SELECT revision FROM workspace WHERE id=1').get();
+    if (row && row.revision !== pathIndex.revision) {
+      const data = readWorkspace().data;
+      pathIndex = {
+        revision: row.revision,
+        items: new Map(Object.values(data.items ?? {}).map((i) => [i.id, i.projectId])),
+        docs: new Map(Object.values(data.docs ?? {}).map((d) => [d.id, d.projectId])),
+      };
+    }
+    return pathIndex;
+  };
+  const projectOfPath = (path, index) => {
     const [, section, id] = /^\/(p|items|docs)\/([^/?#]+)/.exec(path) ?? [];
     if (!section) return { scoped: false };
     if (section === 'p') return { scoped: true, projectId: id };
-    const entity = section === 'items' ? state?.items?.[id] : state?.docs?.[id];
-    return { scoped: true, projectId: entity?.projectId, missing: !entity };
-  };
-  const peersFor = (viewer) => {
-    const state = readWorkspace()?.data;
-    const online = new Map();
-    for (const stream of streams) online.set(stream.user.id, stream.user);
-    return [...online.values()].map((peer) => {
-      const path = presence.get(peer.id)?.path ?? '';
-      const { scoped, projectId, missing } = projectOfPath(path, state);
-      const readable = !scoped || (!missing && (projectId ? canReadProject(viewer, projectId) : canReadProject(viewer, undefined)));
-      return { id: peer.id, name: peer.name, path: readable ? path : '', at: presence.get(peer.id)?.at ?? 0 };
-    });
+    const map = section === 'items' ? index.items : index.docs;
+    return { scoped: true, projectId: map.get(id), missing: !map.has(id) };
   };
   const broadcastPresence = () => {
-    for (const stream of streams) emit(stream, 'presence', { peers: peersFor(stream.user) });
+    if (!streams.size) return;
+    const index = currentPathIndex();
+    const online = new Map();
+    for (const stream of streams) online.set(stream.user.id, stream.user);
+    const peers = [...online.values()].map((peer) => {
+      const entry = presence.get(peer.id);
+      const path = entry?.path ?? '';
+      return { id: peer.id, name: peer.name, path, at: entry?.at ?? 0, ...projectOfPath(path, index) };
+    });
+    // Each member only learns where teammates are when they can see that place too.
+    for (const stream of streams) {
+      const viewer = stream.user;
+      emit(stream, 'presence', {
+        peers: peers.map(({ scoped, projectId, missing, ...peer }) => ({
+          ...peer,
+          path: !scoped || (!missing && canReadProject(viewer, projectId)) ? peer.path : '',
+        })),
+      });
+    }
   };
   const broadcastRevision = (revision, actorId, tab) => {
     for (const stream of streams) emit(stream, 'revision', { revision, actorId, tab });

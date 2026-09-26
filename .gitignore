@@ -12,3 +12,6 @@ playwright-report
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Agent worktrees
+.claude/worktrees/

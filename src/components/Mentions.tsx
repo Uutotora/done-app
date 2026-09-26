@@ -81,7 +81,7 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
     if (!query) return [];
     const q = query.text.toLowerCase();
     return Object.values(people)
-      .filter((p) => p.id !== meId && p.name)
+      .filter((p) => p.id !== meId && p.name && !p.removed && !p.access?.suspended)
       .filter((p) => {
         const name = p.name.toLowerCase();
         return !q || name.startsWith(q) || name.split(/\s+/).some((w) => w.startsWith(q));

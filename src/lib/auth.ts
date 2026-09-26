@@ -7,14 +7,24 @@ import { usePresence, type Peer } from './presence';
 import { applyShared, diffShared } from '../../server/merge.mjs';
 import type { DataState } from './types';
 
-export type AccessRole = 'owner' | 'admin' | 'member' | 'viewer';
+/** Workspace roles, strongest first. "owner" is shown as super admin. */
+export type AccessRole = 'owner' | 'admin' | 'editor' | 'viewer';
+/** What someone can do inside one project, weakest first. */
+export type AccessLevel = 'viewer' | 'commenter' | 'editor' | 'full';
+export type ProjectLevel = Exclude<AccessLevel, 'full'>;
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
   role: AccessRole;
+  /** null means every project, including future ones. */
   projectIds: string[] | null;
+  /** Per-project level when it differs from what the role gives. */
+  projectRoles?: Record<string, ProjectLevel>;
+  canCreateProjects?: boolean;
   disabled?: boolean;
+  createdAt?: string;
+  lastSeen?: number | null;
 }
 type SyncStatus = 'saved' | 'saving' | 'error';
 interface AuthState {
@@ -27,12 +37,33 @@ interface AuthState {
 }
 export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, error: '', sync: 'saved', syncError: '' }));
 export const isAdmin = (user: AuthUser | null) => !!user && ['owner', 'admin'].includes(user.role);
-export function canEditProject(projectId?: string) {
-  const { mode, user } = useAuth.getState();
-  return mode === 'local' || !user
-    ? mode === 'local'
-    : user.role !== 'viewer' && (isAdmin(user) || user.projectIds === null || (!!projectId && user.projectIds.includes(projectId)));
+
+const LEVELS: AccessLevel[] = ['viewer', 'commenter', 'editor', 'full'];
+const rank = (level: AccessLevel | null) => (level ? LEVELS.indexOf(level) : -1);
+
+/** Same rules as the server (server/access.mjs): the level a user has in a project, or null. */
+export function levelOf(user: AuthUser, projectId?: string): AccessLevel | null {
+  if (isAdmin(user)) return 'full';
+  if (user.projectIds !== null && !(projectId && user.projectIds.includes(projectId))) return null;
+  const set = projectId ? user.projectRoles?.[projectId] : undefined;
+  const base: ProjectLevel = user.role === 'viewer' ? 'viewer' : 'editor';
+  const level = set ?? base;
+  return user.role === 'viewer' && level === 'editor' ? 'commenter' : level;
 }
+
+/** Level of the signed-in person in a project. The local demo has full access everywhere. */
+export function projectLevel(projectId?: string, state = useAuth.getState()): AccessLevel | null {
+  if (state.mode !== 'signedIn' || !state.user) return 'full';
+  return levelOf(state.user, projectId);
+}
+export const canEditProject = (projectId?: string) => rank(projectLevel(projectId)) >= rank('editor');
+export const canCommentProject = (projectId?: string) => rank(projectLevel(projectId)) >= rank('commenter');
+export function canCreateProjects(state = useAuth.getState()): boolean {
+  if (state.mode !== 'signedIn' || !state.user) return true;
+  return isAdmin(state.user) || (state.user.role === 'editor' && state.user.canCreateProjects !== false);
+}
+export const useProjectLevel = (projectId?: string) => useAuth((s) => projectLevel(projectId, s));
+export const useCanCreateProjects = () => useAuth((s) => canCreateProjects(s));
 /** Identifies this browser tab so it can ignore live events about its own saves. */
 const TAB_ID = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Math.random());
 
@@ -93,9 +124,9 @@ function applyRemote(data: Partial<DataState>, user: AuthUser, rev: number, keep
   if (local) scheduleFlush();
 }
 
-async function pull(keepLocal = true) {
+async function pull(keepLocal = true, force = false) {
   const result = await api<{ data: DataState; revision: number; user: AuthUser }>('/api/workspace');
-  if (!keepLocal || result.revision !== revision || !base) applyRemote(result.data, result.user, result.revision, keepLocal);
+  if (force || !keepLocal || result.revision !== revision || !base) applyRemote(result.data, result.user, result.revision, keepLocal);
   else useAuth.setState({ user: result.user });
 }
 
@@ -196,6 +227,8 @@ function startSync() {
       const { revision: rev, tab } = JSON.parse((e as MessageEvent).data) as { revision: number; tab?: string };
       if (tab !== TAB_ID && rev !== revision) schedulePull();
     });
+    // An administrator changed this member's role or projects: reload what they can see.
+    events.addEventListener('access', () => void exclusive(() => pull(true, true).catch(handleSyncError)));
     events.addEventListener('presence', (e) => {
       usePresence.setState({ peers: (JSON.parse((e as MessageEvent).data) as { peers: Peer[] }).peers });
     });
@@ -307,14 +340,100 @@ export async function logout() {
   useAuth.setState({ mode: 'signedOut', user: null, sync: 'saved', error: '' });
 }
 
+/**
+ * Client-side mirror of the server permissions, so a blocked change is refused
+ * right away with a clear message instead of failing when it is saved.
+ */
+function allowedAction(action: string, args: unknown[], user: AuthUser): boolean {
+  const s = useData.getState();
+  const edit = (...projectIds: (string | undefined)[]) => projectIds.every((id) => canEditProject(id));
+  const itemProject = (id: unknown) => s.items[id as string]?.projectId;
+  const docProject = (id: unknown) => s.docs[id as string]?.projectId;
+  const nodeProject = (id: unknown) => s.files[id as string]?.projectId;
+  const sprintProject = (id: unknown) => s.sprints[id as string]?.projectId;
+  const ids = (value: unknown) => (Array.isArray(value) ? (value as string[]) : []);
+  const patch = (value: unknown) => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
+  const moveTarget = (value: unknown) => (patch(value).projectId as string | undefined) ?? undefined;
+  switch (action) {
+    case 'markNotifications':
+    case 'archiveNotifications':
+    case 'pushTrash':
+    case 'restore':
+      return true;
+    case 'addPerson':
+    case 'removePerson':
+    case 'updateWorkspace':
+    case 'createGroup':
+    case 'updateGroup':
+    case 'deleteGroup':
+    case 'emptyTrash':
+    case 'purgeTrash':
+    case 'restoreTrash':
+      return isAdmin(user);
+    case 'updatePerson':
+      return args[0] === user.id || isAdmin(user);
+    case 'createProject':
+    case 'duplicateProject':
+      return canCreateProjects();
+    case 'deleteProject':
+      return isAdmin(user) || s.projects[args[0] as string]?.createdBy === user.id;
+    case 'updateProject':
+    case 'moveProject':
+    case 'setMap':
+    case 'createSprint':
+    case 'applyPlaneStates':
+      return edit(args[0] as string);
+    case 'createItem':
+      return edit(patch(args[0]).projectId as string);
+    case 'updateItem':
+    case 'duplicateItem':
+      return edit(itemProject(args[0])) && (!moveTarget(args[1]) || edit(moveTarget(args[1])));
+    case 'updateItems':
+      return edit(...ids(args[0]).map(itemProject)) && (!moveTarget(args[1]) || edit(moveTarget(args[1])));
+    case 'deleteItems':
+    case 'reorderItems':
+      return edit(...ids(args[0]).map(itemProject));
+    case 'createDoc': {
+      const p = patch(args[0]);
+      return edit((p.projectId as string | undefined) ?? (p.parentId ? docProject(p.parentId) : undefined));
+    }
+    case 'updateDoc':
+    case 'duplicateDoc':
+    case 'deleteDoc':
+      return edit(docProject(args[0]));
+    case 'moveDoc':
+      return edit(docProject(args[0])) && (!args[1] || edit(docProject(args[1])));
+    case 'createFolder':
+    case 'createLink':
+    case 'addFile':
+      return edit(patch(args[0]).projectId as string | undefined);
+    case 'updateNode':
+      return edit(nodeProject(args[0]));
+    case 'deleteNodes':
+      return edit(...ids(args[0]).map(nodeProject));
+    case 'moveNodes':
+      return edit(...ids(args[0]).map(nodeProject)) && edit(args[2] as string | undefined);
+    case 'addComment': {
+      const target = args[0] === 'item' ? itemProject(args[1]) : docProject(args[1]);
+      return canCommentProject(target);
+    }
+    case 'updateComment':
+    case 'deleteComment':
+      return s.comments[args[0] as string]?.authorId === user.id || isAdmin(user);
+    case 'updateSprint':
+    case 'startSprint':
+    case 'completeSprint':
+    case 'deleteSprint':
+      return edit(sprintProject(args[0]));
+    default:
+      return user.role !== 'viewer';
+  }
+}
+
 setMutationPolicy((action, args) => {
   const { mode, user } = useAuth.getState();
   if (mode !== 'signedIn' || !user) return true;
-  const adminActions = ['addPerson', 'removePerson', 'updateWorkspace', 'createGroup', 'updateGroup', 'deleteGroup', 'emptyTrash', 'purgeTrash'];
-  let allowed = user.role !== 'viewer' && (!adminActions.includes(action) || isAdmin(user));
-  if (['markNotifications', 'archiveNotifications'].includes(action)) allowed = true;
-  if (action === 'updatePerson' && args[0] !== user.id && !isAdmin(user)) allowed = false;
-  if (action === 'createProject' && user.projectIds !== null && !isAdmin(user)) allowed = false;
+  const allowed = allowedAction(action, args, user);
   if (!allowed)
     toast({
       message: useData.getState().prefs.lang === 'ru' ? 'Недостаточно прав для этого действия.' : 'You do not have permission for this action.',

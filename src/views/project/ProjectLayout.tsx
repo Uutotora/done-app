@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router';
-import { MoreHorizontal, Plus, Trash2, Link2 } from 'lucide-react';
+import { Eye, MessageSquare, MoreHorizontal, Plus, Trash2, Link2 } from 'lucide-react';
 import { useData } from '@/lib/store';
 import { useUI, toast } from '@/lib/ui';
 import { useT } from '@/lib/i18n';
@@ -11,6 +11,8 @@ import { IconButton, Button } from '@/components/ui/Button';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Overlay';
 import { PageIcon } from '@/components/ui/bits';
 import { IconPicker } from '@/components/pickers/IconPicker';
+import { ProjectShareDialog } from '@/components/access/ProjectShare';
+import { isAdmin, useAuth, useProjectLevel } from '@/lib/auth';
 import { NotFound } from '../NotFound';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +26,10 @@ export function ProjectLayout() {
   const touchRecent = useData((s) => s.touchRecent);
   const openCreateItem = useUI((s) => s.openCreateItem);
   const tab = location.pathname.split('/')[3] ?? 'overview';
+  const level = useProjectLevel(projectId);
+  const canEdit = level === 'editor' || level === 'full';
+  const canDelete = useAuth((s) => s.mode !== 'signedIn' || isAdmin(s.user) || (!!s.user && project?.createdBy === s.user.id));
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     if (projectId && project) touchRecent({ kind: 'project', id: projectId });
@@ -44,9 +50,14 @@ export function ProjectLayout() {
         favorite={{ kind: 'project', id: project.id }}
         actions={
           <>
-            <Button size="sm" variant="primary" icon={<Plus size={15} />} onClick={() => openCreateItem({ projectId: project.id })}>
-              {t('common.new')}
+            <Button size="sm" variant="ghost" onClick={() => setSharing(true)} className="text-fg">
+              {t('share.button')}
             </Button>
+            {canEdit && (
+              <Button size="sm" variant="primary" icon={<Plus size={15} />} onClick={() => openCreateItem({ projectId: project.id })}>
+                {t('common.new')}
+              </Button>
+            )}
             <Menu
               align="end"
               trigger={
@@ -64,30 +75,39 @@ export function ProjectLayout() {
               >
                 {t('common.copyLink')}
               </MenuItem>
-              <MenuSeparator />
-              <MenuItem
-                danger
-                icon={<Trash2 size={15} />}
-                onSelect={() => {
-                  navigate('/');
-                  deleteProjectWithUndo(project.id);
-                }}
-              >
-                {t('project.delete')}
-              </MenuItem>
+              {canDelete && <MenuSeparator />}
+              {canDelete && (
+                <MenuItem
+                  danger
+                  icon={<Trash2 size={15} />}
+                  onSelect={() => {
+                    navigate('/');
+                    deleteProjectWithUndo(project.id);
+                  }}
+                >
+                  {t('project.delete')}
+                </MenuItem>
+              )}
             </Menu>
           </>
         }
       />
+      {!canEdit && level && (
+        <div className="flex h-8 shrink-0 items-center justify-center gap-2 border-b border-line bg-subtle px-4 text-[12.5px] text-fg-3">
+          {level === 'commenter' ? <MessageSquare size={13} /> : <Eye size={13} />}
+          {level === 'commenter' ? t('readonly.commenter') : t('readonly.viewer')}
+        </div>
+      )}
       {!isOverview && (
         <div className="full-width flex items-center gap-3 pb-1 pt-3">
           <IconPicker value={project.icon} onChange={(v) => updateProject(project.id, { icon: v ?? '📁' })} allowRemove={false}>
-            <button className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-hover">
+            <button disabled={!canEdit} className="flex h-9 w-9 items-center justify-center rounded-md enabled:hover:bg-hover">
               <PageIcon icon={project.icon} size={26} />
             </button>
           </IconPicker>
           <input
             key={project.id}
+            readOnly={!canEdit}
             defaultValue={project.name}
             placeholder={t('project.untitled')}
             onBlur={(e) => e.target.value !== project.name && updateProject(project.id, { name: e.target.value })}
@@ -100,6 +120,7 @@ export function ProjectLayout() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         <Outlet />
       </div>
+      {sharing && <ProjectShareDialog projectId={project.id} open onOpenChange={setSharing} />}
     </div>
   );
 }

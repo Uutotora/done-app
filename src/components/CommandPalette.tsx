@@ -28,6 +28,7 @@ import { blocksToText, matches, modKey } from '@/lib/utils';
 import { PageIcon, Kbd } from './ui/bits';
 import { StatusIcon, TypeIcon } from './pickers/icons';
 import { NodeIcon } from './files/NodeIcon';
+import { canCreateProjects } from '@/lib/auth';
 
 export function CommandPalette() {
   const t = useT();
@@ -218,15 +219,19 @@ export function CommandPalette() {
                 {(() => {
                   const actions = [
                     { k: 'new-item', icon: <Plus size={16} />, label: t('cmd.newItem'), sc: 'C', fn: () => ui.openCreateItem() },
-                    {
-                      k: 'new-project',
-                      icon: <FolderPlus size={16} />,
-                      label: t('cmd.newProject'),
-                      fn: () => {
-                        const id = createProject({ name: '' });
-                        if (id) navigate(`/p/${id}/overview`);
-                      },
-                    },
+                    ...(canCreateProjects()
+                      ? [
+                          {
+                            k: 'new-project',
+                            icon: <FolderPlus size={16} />,
+                            label: t('cmd.newProject'),
+                            fn: () => {
+                              const id = createProject({ name: '' });
+                              if (id) navigate(`/p/${id}/overview`);
+                            },
+                          },
+                        ]
+                      : []),
                     {
                       k: 'new-doc',
                       icon: <FilePlus size={16} />,

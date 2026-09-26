@@ -128,6 +128,15 @@ describe('roles on the server', () => {
     ).toBe(200);
   });
 
+  it('keeps editing access working after a project in it was deleted', async () => {
+    const res = await call(`/api/admin/members/${ids.ned}`, 'PATCH', {
+      projectIds: ['alpha', 'beta', 'gamma'],
+      projectRoles: { beta: 'commenter', gamma: 'viewer' },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).member).toMatchObject({ projectIds: ['alpha', 'beta'], projectRoles: { beta: 'commenter' } });
+  });
+
   it('respects per-project levels: commenters comment, viewers only read', async () => {
     const b1 = (await load('ned')).data.items.b1;
     expect((await patch('ned', { records: { items: { b1: { before: b1, after: { ...b1, title: 'Edited' } } } } })).status).toBe(403);
@@ -156,6 +165,21 @@ describe('roles on the server', () => {
     expect((await call(`/api/admin/members/${ids.owner}`, 'PATCH', { role: 'admin' }, 'ada')).status).toBe(200);
     expect((await call(`/api/admin/members/${ids.ada}`, 'DELETE', {}, 'owner')).status).toBe(403);
     expect((await call(`/api/admin/members/${ids.owner}`, 'PATCH', { role: 'owner' }, 'ada')).status).toBe(200);
+  });
+
+  it('shows every member the directory of names and roles, without project access', async () => {
+    const res = await call('/api/members', 'GET', undefined, 'ned');
+    expect(res.status).toBe(200);
+    const { members } = await res.json();
+    expect(members.find((m: { id: string }) => m.id === ids.vic)).toMatchObject({ name: 'vic', role: 'viewer' });
+    expect(members.every((m: Record<string, unknown>) => !('projectIds' in m) && !('projectRoles' in m))).toBe(true);
+    expect((await call('/api/members', 'GET', undefined, '')).status).toBe(401);
+  });
+
+  it('logs sign-ins in the security log', async () => {
+    await call('/api/auth/login', 'POST', { email: 'ned@example.com', password: 'a-long-ned-password' }, '');
+    const { events } = await (await call('/api/admin/audit')).json();
+    expect(events.some((e: { action: string; name: string }) => e.action === 'account.login' && e.name === 'ned')).toBe(true);
   });
 
   it('removes a member from the workspace but keeps their name on past work', async () => {

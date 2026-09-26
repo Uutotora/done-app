@@ -19,6 +19,7 @@ import { useOpenFileNode } from '@/views/Files';
 import { cn } from '@/lib/utils';
 import { WorkspacePulse } from '@/components/ProjectHealth';
 import type { Item, Person } from '@/lib/types';
+import { useCanCreateProjects } from '@/lib/auth';
 
 const fadeUp = (i: number) => ({
   initial: { opacity: 0, y: 4 },
@@ -36,6 +37,7 @@ export function Home() {
   const people = useData((s) => s.people);
   const recent = useData((s) => s.prefs.recent);
   const createProject = useData((s) => s.createProject);
+  const canCreate = useCanCreateProjects();
   const createDoc = useData((s) => s.createDoc);
   const openLinkDialog = useUI((s) => s.openLinkDialog);
   const files = useData((s) => s.files);
@@ -112,15 +114,17 @@ export function Home() {
               if (id) navigate(`/docs/${id}`);
             }}
           />
-          <QuickAction
-            icon={<FolderPlus size={18} />}
-            color="orange"
-            label={t('home.quick.project')}
-            onClick={() => {
-              const id = createProject({ name: '' });
-              if (id) navigate(`/p/${id}/overview`);
-            }}
-          />
+          {canCreate && (
+            <QuickAction
+              icon={<FolderPlus size={18} />}
+              color="orange"
+              label={t('home.quick.project')}
+              onClick={() => {
+                const id = createProject({ name: '' });
+                if (id) navigate(`/p/${id}/overview`);
+              }}
+            />
+          )}
         </motion.div>
 
         <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_320px]">

@@ -196,10 +196,12 @@ export function createAuthApi({
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     res.end(JSON.stringify(value));
   };
+  // Projects deleted since access was given are dropped instead of failing the whole change.
   const projectsInput = (value) => {
     if (value === null || value === undefined) return null;
-    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !readWorkspace()?.data.projects[v])) fail(400, 'Invalid project access');
-    return JSON.stringify([...new Set(value)]);
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) fail(400, 'Invalid project access');
+    const projects = readWorkspace()?.data.projects ?? {};
+    return JSON.stringify([...new Set(value)].filter((id) => projects[id]));
   };
   const LEVEL_INPUT = ['viewer', 'commenter', 'editor'];
   const levelsInput = (value) => {
@@ -208,8 +210,8 @@ export function createAuthApi({
     const projects = readWorkspace()?.data.projects ?? {};
     const out = {};
     for (const [id, level] of Object.entries(value)) {
-      if (!projects[id] || !LEVEL_INPUT.includes(level)) fail(400, 'Invalid project access');
-      out[id] = level;
+      if (!LEVEL_INPUT.includes(level)) fail(400, 'Invalid project access');
+      if (projects[id]) out[id] = level;
     }
     return JSON.stringify(out);
   };
@@ -234,7 +236,7 @@ export function createAuthApi({
       !path.startsWith('/api/auth/') &&
       !path.startsWith('/api/admin/') &&
       !path.startsWith('/api/projects/') &&
-      !['/api/workspace', '/api/events', '/api/presence'].includes(path) &&
+      !['/api/workspace', '/api/events', '/api/presence', '/api/members'].includes(path) &&
       !path.startsWith('/api/blobs/')
     ) {
       next?.();
@@ -276,6 +278,7 @@ export function createAuthApi({
           const fresh = db.prepare('SELECT * FROM users WHERE id=?').get(row.id);
           if (fresh.disabled || fresh.password !== row.password) fail(401, 'Incorrect email or password');
           user = publicUser(fresh);
+          audit(user.id, 'account.login');
         } else {
           if (password.length < 12) fail(400, 'Use at least 12 characters for the password');
           const name = String(input.name ?? '')
@@ -372,6 +375,13 @@ export function createAuthApi({
           broadcastPresence();
         });
         return true;
+      }
+      if (path === '/api/members' && req.method === 'GET') {
+        // The directory every member sees: who is in the workspace and their role, without project access.
+        const rows = db.prepare('SELECT * FROM users WHERE disabled=0 ORDER BY created_at').all().map(publicUser);
+        return send(res, 200, {
+          members: rows.map((m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, lastSeen: m.lastSeen, createdAt: m.createdAt })),
+        });
       }
       if (path === '/api/presence' && req.method === 'POST') {
         const input = await authenticatedBody(req, 4096);

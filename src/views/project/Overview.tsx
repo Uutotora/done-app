@@ -147,6 +147,7 @@ export function Overview() {
             <SectionTitle>{t('project.brief')}</SectionTitle>
             <Editor
               key={project.id}
+              projectId={project.id}
               initial={project.brief}
               onChange={(blocks) => useData.getState().updateProject(project.id, { brief: blocks })}
               placeholder={t('project.briefPlaceholder')}

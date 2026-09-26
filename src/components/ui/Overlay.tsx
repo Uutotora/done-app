@@ -258,7 +258,7 @@ export function EntriesMenu({
 
 /** Right-click menu with the same entries as the row's "..." menu, like Notion. */
 export function ContextMenu({ children, entries, disabled }: { children: ReactNode; entries: MenuEntry[]; disabled?: boolean }) {
-  if (disabled) return <>{children}</>;
+  if (disabled || !entries.length) return <>{children}</>;
   return (
     <RContext.Root modal={false}>
       <RContext.Trigger asChild>{children}</RContext.Trigger>

@@ -37,7 +37,7 @@ async function serveFile(res, file, cache) {
 createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
 
-  if (/^\/api\/(auth\/|admin\/|projects\/|workspace$|events$|presence$|blobs\/)/.test(url.pathname)) return auth.handler(req, res);
+  if (/^\/api\/(auth\/|admin\/|projects\/|workspace$|events$|presence$|members$|blobs\/)/.test(url.pathname)) return auth.handler(req, res);
 
   if (url.pathname.startsWith('/api/plane/')) {
     if (!auth.authenticate(req)) {

@@ -27,7 +27,6 @@ import { NotFound } from '@/views/NotFound';
 const MapView = lazy(() => import('@/views/ProjectMap'));
 const DocPage = lazy(() => import('@/views/DocPage'));
 const ItemPage = lazy(() => import('@/views/ItemPage'));
-const Admin = lazy(() => import('@/views/Admin'));
 const Settings = lazy(() => import('@/views/Settings'));
 
 function useHydration() {
@@ -98,7 +97,7 @@ export function App() {
                   <Route path="files" element={<FilesView />} />
                   <Route path="docs/:docId" element={<Lazy el={<DocPage />} />} />
                   <Route path="items/:itemId" element={<Lazy el={<ItemPage />} />} />
-                  <Route path="admin" element={<Lazy el={<Admin />} />} />
+                  <Route path="admin" element={<Navigate to="/settings/people" replace />} />
                   <Route path="settings/:tab?" element={<Lazy el={<Settings />} />} />
                   <Route path="p/:projectId" element={<ProjectLayout />}>
                     <Route index element={<Navigate to="overview" replace />} />

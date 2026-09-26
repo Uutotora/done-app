@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { useAuth } from '@/lib/auth';
+import { useProjectLevel } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 export interface EditorProps {
@@ -10,13 +10,16 @@ export interface EditorProps {
   compact?: boolean;
   editable?: boolean;
   className?: string;
+  /** Project the text belongs to; without edit access there the editor is read-only. */
+  projectId?: string;
 }
 
 const EditorImpl = lazy(() => import('./EditorImpl'));
 
 /** Notion-style block editor (BlockNote), loaded on demand to keep the first paint light. */
 export function Editor(props: EditorProps) {
-  const viewer = useAuth((s) => s.user?.role === 'viewer');
+  const level = useProjectLevel(props.projectId);
+  const readOnly = level !== 'editor' && level !== 'full';
   return (
     <Suspense
       fallback={
@@ -26,7 +29,7 @@ export function Editor(props: EditorProps) {
         </div>
       }
     >
-      <EditorImpl {...props} editable={viewer ? false : props.editable} />
+      <EditorImpl {...props} editable={readOnly ? false : props.editable} />
     </Suspense>
   );
 }

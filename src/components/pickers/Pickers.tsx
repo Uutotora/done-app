@@ -127,6 +127,8 @@ export function PersonPicker({ value, onChange, children, align }: PickerProps<I
     () => [
       { value: undefined, label: t('prop.unassigned'), icon: <Avatar size={16} /> },
       ...Object.values(people)
+        // People who left stay on their old tasks but cannot get new ones.
+        .filter((p) => (!p.removed && !p.access?.suspended) || p.id === value)
         .sort((a, b) => (a.id === meId ? -1 : b.id === meId ? 1 : a.name.localeCompare(b.name)))
         .map((p) => ({
           value: p.id as ID | undefined,
@@ -135,7 +137,7 @@ export function PersonPicker({ value, onChange, children, align }: PickerProps<I
           icon: <Avatar person={p} size={16} />,
         })),
     ],
-    [people, meId, t],
+    [people, meId, t, value],
   );
   return (
     <PickerShell options={options} value={value} onChange={onChange} align={align} placeholder={t('prop.assignee')}>

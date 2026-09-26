@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { NavLink, useLocation, useMatch, useNavigate } from 'react-router';
 import { create } from 'zustand';
 import { useData } from '@/lib/store';
+import { isAdmin, useAuth, useCanCreateProjects, useProjectLevel } from '@/lib/auth';
 import { useUI, toast, showSidebarPeek, hideSidebarPeek } from '@/lib/ui';
 import { useUnreadCount } from '@/lib/inbox';
 import { usePresence } from '@/lib/presence';
@@ -232,6 +233,11 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
     [docs],
   );
 
+  const canCreate = useCanCreateProjects();
+  const admin = useAuth((s) => s.mode !== 'signedIn' || isAdmin(s.user));
+  // Pages outside projects belong to everyone with access to the whole workspace.
+  const workspaceLevel = useProjectLevel(undefined);
+  const canWritePages = workspaceLevel === 'editor' || workspaceLevel === 'full';
   const newProject = (groupId?: ID) => {
     const id = createProject({ name: '', groupId });
     if (!id) return;
@@ -280,11 +286,13 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
             )}
           </NavLink>
         </Tooltip>
-        <Tooltip content={t('nav.newPage')}>
-          <button aria-label={t('nav.newPage')} onClick={() => newPage()} className={SIDEBAR_ICON_BUTTON}>
-            <SquarePen size={17} strokeWidth={1.7} />
-          </button>
-        </Tooltip>
+        {canWritePages && (
+          <Tooltip content={t('nav.newPage')}>
+            <button aria-label={t('nav.newPage')} onClick={() => newPage()} className={SIDEBAR_ICON_BUTTON}>
+              <SquarePen size={17} strokeWidth={1.7} />
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       <div className="shrink-0 px-2">
@@ -324,14 +332,18 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
         <Section
           id="projects"
           title={t('nav.projects')}
-          addMenu={[
-            { key: 'p', icon: <Plus size={15} />, label: t('nav.newProject'), onSelect: () => newProject() },
-            { key: 'g', icon: <FolderPlus size={15} />, label: t('nav.newGroup'), onSelect: newGroup },
-          ]}
+          addMenu={
+            canCreate || admin
+              ? [
+                  ...(canCreate ? [{ key: 'p', icon: <Plus size={15} />, label: t('nav.newProject'), onSelect: () => newProject() }] : []),
+                  ...(admin ? [{ key: 'g', icon: <FolderPlus size={15} />, label: t('nav.newGroup'), onSelect: newGroup }] : []),
+                ]
+              : undefined
+          }
           addLabel={t('nav.newProject')}
         >
           {groups.map((g) => (
-            <GroupBlock key={g.id} group={g} onNewProject={() => newProject(g.id)} />
+            <GroupBlock key={g.id} group={g} onNewProject={canCreate ? () => newProject(g.id) : undefined} manage={admin} />
           ))}
           {ungrouped.map((p) => (
             <ProjectRow key={p.id} project={p} />
@@ -339,7 +351,7 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
           {drag?.kind === 'project' && groups.length > 0 && <UngroupedDrop />}
         </Section>
 
-        <Section id="pages" title={t('nav.pages')} onAdd={() => newPage()} addLabel={t('nav.newPage')}>
+        <Section id="pages" title={t('nav.pages')} onAdd={canWritePages ? () => newPage() : undefined} addLabel={t('nav.newPage')}>
           {rootPages.length === 0 && <div className="flex h-[30px] items-center pl-2.5 text-[13px] text-[var(--sb-muted)]">{t('nav.noPages')}</div>}
           {rootPages.map((d) => (
             <DocRow key={d.id} doc={d} depth={0} onAddChild={newPage} />
@@ -571,7 +583,7 @@ function RefRow({ refItem, scope, onAddChild }: { refItem: Ref; scope: Scope; on
 
 /* ---------------------------------- Groups ----------------------------------- */
 
-function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject: () => void }) {
+function GroupBlock({ group, onNewProject, manage }: { group: ProjectGroup; onNewProject?: () => void; manage: boolean }) {
   const t = useT();
   const key = `group:${group.id}`;
   const expanded = useData((s) => s.prefs.expanded[key] !== false);
@@ -594,12 +606,21 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
     [projectsRec, group.id],
   );
 
+  // Groups belong to the workspace: admins shape them, others may only add projects when allowed.
   const entries: MenuEntry[] = [
-    { key: 'rename', icon: <PenLine size={15} />, label: t('common.rename'), onSelect: () => setRenaming(`tree:${group.id}`) },
-    { key: 'icon', icon: <SmilePlus size={15} />, label: t('group.changeIcon'), onSelect: () => setTimeout(() => setIconOpen(true), 60) },
-    { key: 'new', icon: <Plus size={15} />, label: t('group.addProject'), onSelect: onNewProject },
-    { key: 's', separator: true },
-    { key: 'delete', icon: <Trash2 size={15} />, label: t('group.delete'), danger: true, onSelect: () => deleteGroupWithUndo(group.id) },
+    ...(manage
+      ? [
+          { key: 'rename', icon: <PenLine size={15} />, label: t('common.rename'), onSelect: () => setRenaming(`tree:${group.id}`) },
+          { key: 'icon', icon: <SmilePlus size={15} />, label: t('group.changeIcon'), onSelect: () => setTimeout(() => setIconOpen(true), 60) },
+        ]
+      : []),
+    ...(onNewProject ? [{ key: 'new', icon: <Plus size={15} />, label: t('group.addProject'), onSelect: onNewProject }] : []),
+    ...(manage
+      ? [
+          { key: 's', separator: true as const },
+          { key: 'delete', icon: <Trash2 size={15} />, label: t('group.delete'), danger: true, onSelect: () => deleteGroupWithUndo(group.id) },
+        ]
+      : []),
   ];
 
   return (
@@ -663,10 +684,12 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
           )}
           {!renaming && (
             <RowActions>
-              <button aria-label={t('group.addProject')} onClick={onNewProject} className={ACTION_BUTTON}>
-                <Plus size={16} strokeWidth={1.8} />
-              </button>
-              <MoreButton entries={entries} label={t('common.more')} />
+              {onNewProject && (
+                <button aria-label={t('group.addProject')} onClick={onNewProject} className={ACTION_BUTTON}>
+                  <Plus size={16} strokeWidth={1.8} />
+                </button>
+              )}
+              {entries.length > 0 && <MoreButton entries={entries} label={t('common.more')} />}
             </RowActions>
           )}
         </div>
@@ -741,7 +764,11 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
   const setDrag = useSidebarUI((s) => s.setDrag);
   const base = `/p/${project.id}`;
   const inProject = location.pathname.startsWith(`${base}/`) || location.pathname === base;
-  const draggable = scope === 'tree' && !renaming;
+  const level = useProjectLevel(project.id);
+  const canEdit = level === 'editor' || level === 'full';
+  const canCreate = useCanCreateProjects();
+  const canDelete = useAuth((s) => s.mode !== 'signedIn' || isAdmin(s.user) || (!!s.user && project.createdBy === s.user.id));
+  const draggable = scope === 'tree' && !renaming && canEdit;
 
   const entries: MenuEntry[] = [
     {
@@ -759,17 +786,23 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
         toast({ message: t('common.copied') });
       },
     },
-    {
-      key: 'dup',
-      icon: <Copy size={15} />,
-      label: t('common.duplicate'),
-      onSelect: () => {
-        const id = duplicateProject(project.id);
-        if (id) navigate(`/p/${id}/overview`);
-      },
-    },
-    { key: 'rename', icon: <PenLine size={15} />, label: t('common.rename'), onSelect: () => setRenaming(renameKey) },
-    {
+    ...(canCreate
+      ? [
+          {
+            key: 'dup',
+            icon: <Copy size={15} />,
+            label: t('common.duplicate'),
+            onSelect: () => {
+              const id = duplicateProject(project.id);
+              if (id) navigate(`/p/${id}/overview`);
+            },
+          },
+        ]
+      : []),
+    ...(canEdit ? [{ key: 'rename', icon: <PenLine size={15} />, label: t('common.rename'), onSelect: () => setRenaming(renameKey) }] : []),
+  ];
+  if (canEdit)
+    entries.push({
       key: 'move',
       icon: <FolderInput size={15} />,
       label: t('group.moveTo'),
@@ -785,19 +818,21 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
             onSelect: () => moveProject(project.id, g.id),
           })),
       ],
-    },
-    { key: 's', separator: true },
-    {
-      key: 'delete',
-      icon: <Trash2 size={15} />,
-      label: t('project.delete'),
-      danger: true,
-      onSelect: () => {
-        if (inProject) navigate('/');
-        deleteProjectWithUndo(project.id);
+    });
+  if (canDelete)
+    entries.push(
+      { key: 's', separator: true },
+      {
+        key: 'delete',
+        icon: <Trash2 size={15} />,
+        label: t('project.delete'),
+        danger: true,
+        onSelect: () => {
+          if (inProject) navigate('/');
+          deleteProjectWithUndo(project.id);
+        },
       },
-    },
-  ];
+    );
 
   const onDrop = () => {
     if (drag?.kind === 'project' && hint && drag.id !== project.id) {
@@ -836,7 +871,7 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
           }}
           onDoubleClick={(e) => {
             e.preventDefault();
-            setRenaming(renameKey);
+            if (canEdit) setRenaming(renameKey);
           }}
           className={cn(sidebarRow(inProject && !expanded), drag?.id === project.id && 'opacity-40')}
           style={{ paddingLeft: 8 + depth * 12 }}
@@ -858,9 +893,11 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
           {!renaming && scope === 'tree' && <ProjectPresence projectId={project.id} />}
           {!renaming && (
             <RowActions>
-              <button aria-label={t('item.new')} onClick={() => openCreateItem({ projectId: project.id })} className={ACTION_BUTTON}>
-                <Plus size={16} strokeWidth={1.8} />
-              </button>
+              {canEdit && (
+                <button aria-label={t('item.new')} onClick={() => openCreateItem({ projectId: project.id })} className={ACTION_BUTTON}>
+                  <Plus size={16} strokeWidth={1.8} />
+                </button>
+              )}
               <MoreButton entries={entries} label={t('common.more')} />
             </RowActions>
           )}

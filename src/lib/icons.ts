@@ -1,5 +1,7 @@
 import {
   Activity,
+  IterationCw,
+  ListTodo,
   AlarmClock,
   Archive,
   Award,
@@ -194,6 +196,10 @@ export const ICONS: Record<string, LucideIcon> = {
   Truck,
 };
 
+const EXTRA: Record<string, LucideIcon> = { ListTodo, IterationCw };
+
+/** Accepts registry names ("Inbox") and kebab-case lucide names ("list-todo"). */
 export function getIcon(name: string): LucideIcon | undefined {
-  return ICONS[name];
+  const pascal = name.includes('-') || /^[a-z]/.test(name) ? name.replace(/(^|-)([a-z0-9])/g, (_, __, c: string) => c.toUpperCase()) : name;
+  return ICONS[name] ?? ICONS[pascal] ?? EXTRA[pascal];
 }

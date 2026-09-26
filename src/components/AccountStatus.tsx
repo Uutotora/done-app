@@ -2,14 +2,21 @@ import { CloudCheck, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
 import { api, flushWorkspace, isAdmin, logout, refreshWorkspace, useAuth } from '@/lib/auth';
 import { useLang } from '@/lib/i18n';
-import { dataSnapshot } from '@/lib/store';
+import { dataSnapshot, useData } from '@/lib/store';
 import { downloadBlob } from '@/lib/utils';
 import { toast } from '@/lib/ui';
 import { useState } from 'react';
+import { usePresence } from '@/lib/presence';
+import { Avatar, AvatarStack } from './ui/bits';
+import { Tooltip } from './ui/Overlay';
 import { Button } from './ui/Button';
 export function AccountStatus() {
   const state = useAuth();
   const ru = useLang() === 'ru';
+  const me = useData((s) => s.people[s.meId]);
+  const people = useData((s) => s.people);
+  const live = usePresence((s) => s.live);
+  const peers = usePresence((s) => s.peers).filter((p) => p.id !== state.user?.id && people[p.id]);
   return (
     <div className="border-t border-line px-3 py-3 text-[12px]">
       {isAdmin(state.user) && (
@@ -19,6 +26,7 @@ export function AccountStatus() {
         </Link>
       )}
       <div className="flex items-center gap-2">
+        {state.user && <Avatar person={me} size={18} />}
         <span className="min-w-0 flex-1 truncate font-medium">{state.user?.name ?? (ru ? 'Локальное демо' : 'Local demo')}</span>
         <button
           aria-label={ru ? 'Выйти' : 'Sign out'}
@@ -31,7 +39,16 @@ export function AccountStatus() {
       <div className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-3">
         {state.mode === 'signedIn' ? (
           <>
-            {state.sync === 'saving' ? <Loader2 size={11} className="animate-spin" /> : <CloudCheck size={11} />}
+            {state.sync === 'saving' ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <span className="relative flex h-[11px] w-[11px] items-center justify-center">
+                <CloudCheck size={11} />
+                {live && (
+                  <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--c-green-solid)] ring-1 ring-[var(--bg-sidebar)]" />
+                )}
+              </span>
+            )}
             {state.sync === 'saved'
               ? ru
                 ? 'Сохранено на сервере'
@@ -50,6 +67,16 @@ export function AccountStatus() {
           'Stored in this browser'
         )}
       </div>
+      {peers.length > 0 && (
+        <Tooltip content={peers.map((p) => p.name).join(', ')} side="top">
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-fg-3">
+            <AvatarStack people={peers.map((p) => people[p.id])} size={18} max={5} />
+            <span>
+              {ru ? 'В сети' : 'Online'} · {peers.length}
+            </span>
+          </div>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -57,15 +84,12 @@ export function SyncNotice() {
   const { mode, sync, syncError, user } = useAuth();
   const ru = useLang() === 'ru';
   if (mode !== 'signedIn') return null;
-  if (sync === 'error' || sync === 'conflict')
+  if (sync === 'error')
     return (
       <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-[var(--c-orange-bg)] px-4 py-2 text-[12px]">
         <span className="flex-1">
-          {sync === 'conflict'
-            ? ru
-              ? 'Другой участник изменил пространство. Скачайте свои изменения перед загрузкой новой версии.'
-              : 'Another member changed the workspace. Download your changes before loading the latest version.'
-            : syncError}
+          {ru ? 'Не удалось сохранить изменения: ' : 'Could not save changes: '}
+          {syncError}
         </span>
         <Button
           size="xs"
@@ -78,11 +102,9 @@ export function SyncNotice() {
         >
           {ru ? 'Скачать изменения' : 'Download changes'}
         </Button>
-        {sync === 'error' && (
-          <Button size="xs" onClick={() => void flushWorkspace()}>
-            {ru ? 'Повторить' : 'Retry'}
-          </Button>
-        )}
+        <Button size="xs" onClick={() => void flushWorkspace()}>
+          {ru ? 'Повторить' : 'Retry'}
+        </Button>
         <Button
           size="xs"
           onClick={() => {
@@ -93,7 +115,7 @@ export function SyncNotice() {
                   : 'Load the server version? Unsaved changes will be replaced. Download them first.',
               )
             )
-              void refreshWorkspace().catch((e) => toast({ message: e.message, tone: 'error' }));
+              void refreshWorkspace(true).catch((e) => toast({ message: e.message, tone: 'error' }));
           }}
         >
           {ru ? 'Загрузить версию сервера' : 'Load server version'}

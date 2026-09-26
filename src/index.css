@@ -31,6 +31,11 @@
   --shadow-lg: rgba(15, 15, 15, 0.05) 0 0 0 1px, rgba(15, 15, 15, 0.1) 0 5px 10px, rgba(15, 15, 15, 0.2) 0 15px 40px;
   --overlay: rgba(15, 15, 15, 0.45);
 
+  /* Charts: one series hue plus a neutral reference line (validated against both surfaces). */
+  --chart-series: #2383e2;
+  --chart-reference: #8c8b87;
+  --chart-grid: rgba(55, 53, 47, 0.09);
+
   --c-gray-bg: #f1f1ef;
   --c-gray-text: #787774;
   --c-gray-solid: #9b9a97;
@@ -84,6 +89,10 @@
   --shadow-md: rgba(255, 255, 255, 0.06) 0 0 0 1px, rgba(0, 0, 0, 0.3) 0 3px 6px, rgba(0, 0, 0, 0.4) 0 9px 24px;
   --shadow-lg: rgba(255, 255, 255, 0.06) 0 0 0 1px, rgba(0, 0, 0, 0.3) 0 5px 10px, rgba(0, 0, 0, 0.5) 0 15px 40px;
   --overlay: rgba(0, 0, 0, 0.6);
+
+  --chart-series: #3d95e0;
+  --chart-reference: #6e6d6a;
+  --chart-grid: rgba(255, 255, 255, 0.075);
 
   --c-gray-bg: #2f2f2f;
   --c-gray-text: #9b9b9b;
@@ -570,18 +579,24 @@
 }
 
 /* Sidebar interactions keep text and emoji stable; only controls crossfade. */
-.workspace-sidebar {
+.workspace-sidebar,
+.sidebar-floating {
   --text-2: #62615e;
   --text-3: #91908c;
 }
-.dark .workspace-sidebar {
+.dark .workspace-sidebar,
+.dark .sidebar-floating {
   --text-2: #c0bfbd;
   --text-3: #8e8d89;
 }
-.workspace-sidebar .sidebar-row {
-  transition:
-    background-color 100ms ease-out,
-    color 100ms ease-out;
+.sidebar-row {
+  -webkit-tap-highlight-color: transparent;
+}
+/* Rows without the glide highlight (touch screens) still get feedback on press. */
+@media (hover: none) {
+  .sidebar-row:active {
+    background: var(--bg-active);
+  }
 }
 .page-emoji {
   opacity: 1;
@@ -625,6 +640,7 @@ textarea {
 @media (hover: none) {
   .workspace-sidebar [class*='opacity-0'] {
     opacity: 1;
+    transform: none;
   }
   .workspace-sidebar [class*='group-hover/row:opacity-0'] {
     opacity: 0;

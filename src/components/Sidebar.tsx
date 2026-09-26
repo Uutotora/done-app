@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
+  ChevronsRight,
   CircleDot,
   Copy,
   FileText,
@@ -12,6 +13,8 @@ import {
   FolderOpen,
   FolderPlus,
   House,
+  Inbox,
+  IterationCw,
   KanbanSquare,
   Link2,
   ListTodo,
@@ -32,13 +35,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { NavLink, useLocation, useMatch, useNavigate } from 'react-router';
 import { create } from 'zustand';
 import { useData } from '@/lib/store';
-import { useUI, toast } from '@/lib/ui';
+import { useUI, toast, showSidebarPeek, hideSidebarPeek } from '@/lib/ui';
+import { useUnreadCount } from '@/lib/inbox';
+import { usePresence } from '@/lib/presence';
 import { useT, type TKey } from '@/lib/i18n';
 import { refPath, refTitle } from '@/lib/selectors';
 import { cn, modKey } from '@/lib/utils';
 import { useIsDark, useMediaQuery } from '@/lib/hooks';
 import { deleteDocWithUndo, deleteGroupWithUndo, deleteProjectWithUndo } from '@/lib/actions';
-import { Kbd, PageIcon } from './ui/bits';
+import { Avatar, Kbd, PageIcon } from './ui/bits';
+import { GlideHighlight, useHoverGlide } from './HoverGlide';
 import { ContextMenu, EntriesMenu, Tooltip, type MenuEntry } from './ui/Overlay';
 import { IconButton } from './ui/Button';
 import { IconPicker } from './pickers/IconPicker';
@@ -51,6 +57,7 @@ export const PROJECT_TABS: { key: string; icon: typeof House; label: TKey }[] = 
   { key: 'roadmap', icon: ChartGantt, label: 'tab.roadmap' },
   { key: 'backlog', icon: ListTodo, label: 'tab.backlog' },
   { key: 'board', icon: KanbanSquare, label: 'tab.board' },
+  { key: 'sprints', icon: IterationCw, label: 'tab.sprints' },
   { key: 'calendar', icon: CalendarDays, label: 'tab.calendar' },
   { key: 'map', icon: Network, label: 'tab.map' },
   { key: 'docs', icon: FileText, label: 'tab.docs' },
@@ -86,16 +93,20 @@ function useStartRename() {
 
 export function Sidebar() {
   const t = useT();
-  const navigate = useNavigate();
   const desktopCollapsed = useData((s) => s.prefs.sidebarCollapsed);
   const mobile = useMediaQuery('(max-width: 767px)');
   const mobileOpen = useUI((s) => s.mobileSidebarOpen);
   const setMobileOpen = useUI((s) => s.setMobileSidebar);
+  const peek = useUI((s) => s.sidebarPeek);
   const collapsed = mobile ? !mobileOpen : desktopCollapsed;
+  const floating = !mobile && desktopCollapsed;
   const location = useLocation();
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname, setMobileOpen]);
+  useEffect(() => {
+    if (!floating) useUI.setState({ sidebarPeek: false });
+  }, [floating]);
   useEffect(() => {
     if (!mobile || !mobileOpen) return;
     const close = (e: KeyboardEvent) => {
@@ -106,36 +117,6 @@ export function Sidebar() {
   }, [mobile, mobileOpen, setMobileOpen]);
   const width = useData((s) => s.prefs.sidebarWidth);
   const setPrefs = useData((s) => s.setPrefs);
-  const workspace = useData((s) => s.workspace);
-  const favorites = useData((s) => s.prefs.favorites);
-  const recent = useData((s) => s.prefs.recent);
-  const planeConfigured = useData((s) => !!(s.plane.config.apiKey && s.plane.config.workspaceSlug));
-  const projectsRec = useData((s) => s.projects);
-  const groupsRec = useData((s) => s.groups);
-  const docs = useData((s) => s.docs);
-  const createProject = useData((s) => s.createProject);
-  const createGroup = useData((s) => s.createGroup);
-  const createDoc = useData((s) => s.createDoc);
-  const setPalette = useUI((s) => s.setPalette);
-  const isDark = useIsDark();
-  const startRename = useStartRename();
-  const drag = useSidebarUI((s) => s.drag);
-
-  const groups = useMemo(() => Object.values(groupsRec).sort((a, b) => a.order - b.order), [groupsRec]);
-  const ungrouped = useMemo(
-    () =>
-      Object.values(projectsRec)
-        .filter((p) => !p.archived && (!p.groupId || !groupsRec[p.groupId]))
-        .sort((a, b) => a.order - b.order),
-    [projectsRec, groupsRec],
-  );
-  const rootPages = useMemo(
-    () =>
-      Object.values(docs)
-        .filter((d) => !d.projectId && !d.parentId)
-        .sort((a, b) => a.order - b.order),
-    [docs],
-  );
 
   const [resizing, setResizing] = useState(false);
   const startResize = useCallback(
@@ -156,6 +137,125 @@ export function Sidebar() {
     [width, setPrefs],
   );
 
+  return (
+    <>
+      <AnimatePresence>
+        {mobile && mobileOpen && (
+          <motion.button
+            key="scrim"
+            aria-label={t('nav.collapse')}
+            onClick={() => setMobileOpen(false)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-20 bg-black/25"
+          />
+        )}
+      </AnimatePresence>
+      <motion.aside
+        initial={false}
+        animate={{ width: collapsed ? 0 : width }}
+        transition={resizing ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 42 }}
+        inert={collapsed}
+        aria-hidden={collapsed}
+        aria-label={t('nav.projects')}
+        className={cn(
+          'workspace-sidebar z-20 h-full shrink-0 overflow-hidden border-line bg-sidebar',
+          !collapsed && 'border-r',
+          mobile ? 'fixed inset-y-0 left-0 shadow-lg' : 'relative',
+        )}
+      >
+        <SidebarBody width={width} />
+
+        {/* Resize handle: a thin line appears on hover, like Notion. */}
+        <div
+          onPointerDown={startResize}
+          onDoubleClick={() => setPrefs({ sidebarWidth: 256 })}
+          className="group/resize absolute right-0 top-0 z-10 flex h-full w-2 cursor-col-resize justify-end"
+        >
+          <span
+            className={cn(
+              'h-full w-[2px] transition-colors delay-100 duration-150 group-hover/resize:bg-line-strong',
+              resizing && 'bg-accent! delay-0',
+            )}
+          />
+        </div>
+      </motion.aside>
+
+      {floating && (
+        <>
+          {/* Hot zone along the left edge that summons the floating sidebar. */}
+          <div
+            aria-hidden
+            className="fixed inset-y-0 left-0 z-30 w-3"
+            onPointerEnter={() => showSidebarPeek(60)}
+            onPointerLeave={() => hideSidebarPeek(400)}
+          />
+          <AnimatePresence>
+            {peek && (
+              <motion.aside
+                key="peek"
+                aria-label={t('nav.projects')}
+                initial={{ x: -width - 24, opacity: 0.4 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -width - 24, opacity: 0.4 }}
+                transition={{ type: 'spring', stiffness: 520, damping: 46, mass: 0.8 }}
+                onPointerEnter={() => showSidebarPeek()}
+                onPointerLeave={() => hideSidebarPeek()}
+                className="sidebar-floating fixed bottom-3 left-0 top-12 z-40 overflow-hidden rounded-r-xl border border-l-0 border-line bg-sidebar shadow-lg"
+                style={{ width }}
+              >
+                <SidebarBody width={width} floating />
+              </motion.aside>
+            )}
+          </AnimatePresence>
+        </>
+      )}
+    </>
+  );
+}
+
+function SidebarBody({ width, floating }: { width: number; floating?: boolean }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const mobile = useMediaQuery('(max-width: 767px)');
+  const setMobileOpen = useUI((s) => s.setMobileSidebar);
+  const setPrefs = useData((s) => s.setPrefs);
+  const workspace = useData((s) => s.workspace);
+  const favorites = useData((s) => s.prefs.favorites);
+  const recent = useData((s) => s.prefs.recent);
+  const planeConfigured = useData((s) => !!(s.plane.config.apiKey && s.plane.config.workspaceSlug));
+  const projectsRec = useData((s) => s.projects);
+  const groupsRec = useData((s) => s.groups);
+  const docs = useData((s) => s.docs);
+  const createProject = useData((s) => s.createProject);
+  const createGroup = useData((s) => s.createGroup);
+  const createDoc = useData((s) => s.createDoc);
+  const setPalette = useUI((s) => s.setPalette);
+  const unread = useUnreadCount();
+  const isDark = useIsDark();
+  const startRename = useStartRename();
+  const drag = useSidebarUI((s) => s.drag);
+  const navGlide = useHoverGlide<HTMLElement>();
+  const treeGlide = useHoverGlide<HTMLDivElement>();
+  const footGlide = useHoverGlide<HTMLDivElement>();
+
+  const groups = useMemo(() => Object.values(groupsRec).sort((a, b) => a.order - b.order), [groupsRec]);
+  const ungrouped = useMemo(
+    () =>
+      Object.values(projectsRec)
+        .filter((p) => !p.archived && (!p.groupId || !groupsRec[p.groupId]))
+        .sort((a, b) => a.order - b.order),
+    [projectsRec, groupsRec],
+  );
+  const rootPages = useMemo(
+    () =>
+      Object.values(docs)
+        .filter((d) => !d.projectId && !d.parentId)
+        .sort((a, b) => a.order - b.order),
+    [docs],
+  );
+
   const newProject = (groupId?: ID) => {
     const id = createProject({ name: '', groupId });
     if (!id) return;
@@ -173,161 +273,148 @@ export function Sidebar() {
   };
 
   return (
-    <>
-      {mobile && mobileOpen && (
-        <button aria-label={t('nav.collapse')} onClick={() => setMobileOpen(false)} className="fixed inset-0 z-20 bg-black/20" />
-      )}
-      <motion.aside
-        initial={false}
-        animate={{ width: collapsed ? 0 : width }}
-        transition={resizing ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 42 }}
-        inert={collapsed}
-        aria-hidden={collapsed}
-        aria-label={t('nav.projects')}
-        className={cn(
-          'workspace-sidebar z-20 h-full shrink-0 overflow-hidden border-line bg-sidebar',
-          !collapsed && 'border-r',
-          mobile ? 'fixed inset-y-0 left-0 shadow-lg' : 'relative',
-        )}
-      >
-        <div className="flex h-full flex-col" style={{ width }}>
-          {/* Workspace switcher */}
-          <div className="group/ws flex h-12 items-center gap-1 px-2 pt-1">
-            <EntriesMenu
-              trigger={
-                <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-hover">
-                  <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] bg-elevated text-[14px] shadow-sm">
-                    <PageIcon icon={workspace.icon} size={16} />
-                  </span>
-                  <span className="truncate text-[14px] font-semibold">{workspace.name}</span>
-                  <ChevronDown size={14} className="shrink-0 text-fg-3" />
-                </button>
-              }
-              entries={[
-                { key: 'settings', icon: <Settings size={15} />, label: t('nav.settings'), onSelect: () => navigate('/settings') },
-                {
-                  key: 'theme',
-                  icon: isDark ? <Sun size={15} /> : <Moon size={15} />,
-                  label: t('cmd.toggleTheme'),
-                  shortcut: `${modKey()}⇧L`,
-                  onSelect: () => setPrefs({ theme: isDark ? 'light' : 'dark' }),
-                },
-              ]}
-            />
-            <Tooltip content={t('nav.collapse')} shortcut={`${modKey()} \\`}>
-              <IconButton
-                className="opacity-0 transition-opacity group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"
-                onClick={() => (mobile ? setMobileOpen(false) : setPrefs({ sidebarCollapsed: true }))}
-                label={t('nav.collapse')}
-              >
-                <ChevronsLeft size={17} />
-              </IconButton>
-            </Tooltip>
-          </div>
-
-          {/* Primary navigation */}
-          <nav className="px-2 pb-2">
-            <button
-              onClick={() => setPalette(true)}
-              className="mb-2 mt-1 flex h-9 w-full items-center gap-2 rounded-lg border border-line-strong px-2.5 text-[14px] text-fg-3 transition-colors hover:bg-hover hover:text-fg-2"
-            >
-              <Search size={17} className="text-fg-3" />
-              <span className="flex-1 text-left">{t('nav.search')}</span>
-              <Kbd>{modKey()}K</Kbd>
+    <div className="flex h-full flex-col" style={{ width }}>
+      {/* Workspace switcher */}
+      <div className="group/ws flex h-12 items-center gap-1 px-2 pt-1">
+        <EntriesMenu
+          trigger={
+            <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-150 hover:bg-hover active:bg-active">
+              <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] bg-elevated text-[14px] shadow-sm transition-transform duration-200 group-hover/ws:scale-105">
+                <PageIcon icon={workspace.icon} size={16} />
+              </span>
+              <span className="truncate text-[14px] font-semibold">{workspace.name}</span>
+              <ChevronDown size={14} className="shrink-0 text-fg-3 transition-transform duration-200 group-hover/ws:translate-y-px" />
             </button>
-            <NavRow to="/" end icon={<House size={17} />} label={t('nav.home')} />
-            <NavRow to="/my-work" icon={<ListTodo size={17} />} label={t('nav.myWork')} />
-            <NavRow to="/calendar" icon={<CalendarDays size={17} />} label={t('nav.calendar')} />
-            <NavRow to="/roadmap" icon={<ChartGantt size={17} />} label={t('nav.roadmap')} />
-            <NavRow to="/files" icon={<FolderOpen size={17} />} label={t('nav.files')} />
-          </nav>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-            {recent.length > 0 && (
-              <Section id="recent" title={t('nav.recent')}>
-                {recent.slice(0, 3).map((ref) => {
-                  const info = refTitle(ref);
-                  return info ? (
-                    <NavRow
-                      key={`${ref.kind}:${ref.id}`}
-                      to={refPath(ref)}
-                      icon={<PageIcon icon={info.icon} size={18} />}
-                      label={info.title || t('common.untitled')}
-                    />
-                  ) : null;
-                })}
-              </Section>
-            )}
-            {favorites.length > 0 && (
-              <Section id="favorites" title={t('nav.favorites')}>
-                {favorites.map((f) => {
-                  const info = refTitle(f);
-                  if (!info) return null;
-                  return (
-                    <NavRow
-                      key={`${f.kind}:${f.id}`}
-                      to={refPath(f)}
-                      icon={<PageIcon icon={info.icon} size={17} />}
-                      label={info.title || t('common.untitled')}
-                    />
-                  );
-                })}
-              </Section>
-            )}
-
-            <Section
-              id="projects"
-              title={t('nav.projects')}
-              addMenu={[
-                { key: 'p', icon: <Plus size={15} />, label: t('nav.newProject'), onSelect: () => newProject() },
-                { key: 'g', icon: <FolderPlus size={15} />, label: t('nav.newGroup'), onSelect: newGroup },
-              ]}
-              addLabel={t('nav.newProject')}
-            >
-              {groups.map((g) => (
-                <GroupBlock key={g.id} group={g} onNewProject={() => newProject(g.id)} />
-              ))}
-              {ungrouped.map((p) => (
-                <ProjectRow key={p.id} project={p} />
-              ))}
-              {drag?.kind === 'project' && groups.length > 0 && <UngroupedDrop />}
-            </Section>
-
-            <Section id="pages" title={t('nav.pages')} onAdd={() => newPage()} addLabel={t('nav.newPage')}>
-              {rootPages.length === 0 && <div className="px-2 py-1 text-[13px] text-fg-4">{t('nav.noPages')}</div>}
-              {rootPages.map((d) => (
-                <DocRow key={d.id} doc={d} depth={0} onAddChild={newPage} />
-              ))}
-            </Section>
-          </div>
-
-          <AccountStatus />
-
-          {/* Footer */}
-          <div className="border-t border-line px-2 py-2">
-            <TrashButton />
-            <NavRow to="/settings" icon={<Settings size={17} />} label={t('nav.settings')} />
-            <NavLink
-              to="/settings/plane"
-              className="mt-1 flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] text-fg-3 transition-colors hover:bg-hover"
-            >
-              <span className={cn('h-1.5 w-1.5 rounded-full', planeConfigured ? 'bg-[var(--c-green-solid)]' : 'bg-fg-4')} />
-              {planeConfigured ? t('nav.planeConnected') : t('nav.planeNotConnected')}
-            </NavLink>
-          </div>
-        </div>
-
-        {/* Resize handle */}
-        <div
-          onPointerDown={startResize}
-          onDoubleClick={() => setPrefs({ sidebarWidth: 256 })}
-          className={cn(
-            'absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-line-strong',
-            resizing && 'bg-accent-soft',
-          )}
+          }
+          entries={[
+            { key: 'settings', icon: <Settings size={15} />, label: t('nav.settings'), onSelect: () => navigate('/settings') },
+            {
+              key: 'theme',
+              icon: isDark ? <Sun size={15} /> : <Moon size={15} />,
+              label: t('cmd.toggleTheme'),
+              shortcut: `${modKey()}⇧L`,
+              onSelect: () => setPrefs({ theme: isDark ? 'light' : 'dark' }),
+            },
+          ]}
         />
-      </motion.aside>
-    </>
+        <Tooltip content={floating ? t('nav.pin') : t('nav.collapse')} shortcut={`${modKey()} \\`}>
+          <IconButton
+            className="opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 hover:-translate-x-px"
+            onClick={() => {
+              if (mobile) setMobileOpen(false);
+              else if (floating) {
+                useUI.setState({ sidebarPeek: false });
+                setPrefs({ sidebarCollapsed: false });
+              } else setPrefs({ sidebarCollapsed: true });
+            }}
+            label={floating ? t('nav.pin') : t('nav.collapse')}
+          >
+            {floating ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
+          </IconButton>
+        </Tooltip>
+      </div>
+
+      {/* Primary navigation */}
+      <nav ref={navGlide.ref} {...navGlide.bind} className="relative px-2 pb-2">
+        <GlideHighlight state={navGlide.state} />
+        <button
+          onClick={() => setPalette(true)}
+          data-glide-off
+          className="group/search relative mb-2 mt-1 flex h-9 w-full items-center gap-2 rounded-lg border border-line-strong bg-bg/40 px-2.5 text-[14px] text-fg-3 transition-[background-color,color,box-shadow,border-color] duration-150 hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border-strong))] hover:bg-bg hover:text-fg-2 hover:shadow-sm"
+        >
+          <Search size={17} className="text-fg-3 transition-transform duration-200 group-hover/search:-rotate-6 group-hover/search:scale-110" />
+          <span className="flex-1 text-left">{t('nav.search')}</span>
+          <Kbd>{modKey()}K</Kbd>
+        </button>
+        <NavRow to="/" end icon={<House size={17} />} label={t('nav.home')} />
+        <NavRow to="/inbox" icon={<Inbox size={17} />} label={t('nav.inbox')} badge={unread} />
+        <NavRow to="/my-work" icon={<ListTodo size={17} />} label={t('nav.myWork')} />
+        <NavRow to="/calendar" icon={<CalendarDays size={17} />} label={t('nav.calendar')} />
+        <NavRow to="/roadmap" icon={<ChartGantt size={17} />} label={t('nav.roadmap')} />
+        <NavRow to="/files" icon={<FolderOpen size={17} />} label={t('nav.files')} />
+      </nav>
+
+      <div ref={treeGlide.ref} {...treeGlide.bind} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        {!drag && <GlideHighlight state={treeGlide.state} />}
+        {recent.length > 0 && (
+          <Section id="recent" title={t('nav.recent')}>
+            {recent.slice(0, 3).map((ref) => {
+              const info = refTitle(ref);
+              return info ? (
+                <NavRow
+                  key={`${ref.kind}:${ref.id}`}
+                  to={refPath(ref)}
+                  icon={<PageIcon icon={info.icon} size={18} />}
+                  label={info.title || t('common.untitled')}
+                />
+              ) : null;
+            })}
+          </Section>
+        )}
+        {favorites.length > 0 && (
+          <Section id="favorites" title={t('nav.favorites')}>
+            {favorites.map((f) => {
+              const info = refTitle(f);
+              if (!info) return null;
+              return (
+                <NavRow
+                  key={`${f.kind}:${f.id}`}
+                  to={refPath(f)}
+                  icon={<PageIcon icon={info.icon} size={17} />}
+                  label={info.title || t('common.untitled')}
+                />
+              );
+            })}
+          </Section>
+        )}
+
+        <Section
+          id="projects"
+          title={t('nav.projects')}
+          addMenu={[
+            { key: 'p', icon: <Plus size={15} />, label: t('nav.newProject'), onSelect: () => newProject() },
+            { key: 'g', icon: <FolderPlus size={15} />, label: t('nav.newGroup'), onSelect: newGroup },
+          ]}
+          addLabel={t('nav.newProject')}
+        >
+          {groups.map((g) => (
+            <GroupBlock key={g.id} group={g} onNewProject={() => newProject(g.id)} />
+          ))}
+          {ungrouped.map((p) => (
+            <ProjectRow key={p.id} project={p} />
+          ))}
+          {drag?.kind === 'project' && groups.length > 0 && <UngroupedDrop />}
+        </Section>
+
+        <Section id="pages" title={t('nav.pages')} onAdd={() => newPage()} addLabel={t('nav.newPage')}>
+          {rootPages.length === 0 && <div className="px-2 py-1 text-[13px] text-fg-4">{t('nav.noPages')}</div>}
+          {rootPages.map((d) => (
+            <DocRow key={d.id} doc={d} depth={0} onAddChild={newPage} />
+          ))}
+        </Section>
+      </div>
+
+      <AccountStatus />
+
+      {/* Footer */}
+      <div ref={footGlide.ref} {...footGlide.bind} className="relative border-t border-line px-2 py-2">
+        <GlideHighlight state={footGlide.state} />
+        <TrashButton />
+        <NavRow to="/settings" icon={<Settings size={17} />} label={t('nav.settings')} />
+        <NavLink
+          to="/settings/plane"
+          data-glide
+          className="relative mt-1 flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] text-fg-3 transition-colors hover:text-fg-2"
+        >
+          <span className={cn('relative flex h-1.5 w-1.5 rounded-full', planeConfigured ? 'bg-[var(--c-green-solid)]' : 'bg-fg-4')}>
+            {planeConfigured && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--c-green-solid)] opacity-40 [animation-duration:2.4s]" />
+            )}
+          </span>
+          {planeConfigured ? t('nav.planeConnected') : t('nav.planeNotConnected')}
+        </NavLink>
+      </div>
+    </div>
   );
 }
 
@@ -356,20 +443,24 @@ function Section({
       size="xs"
       onClick={onAdd}
       label={addLabel}
-      className="opacity-0 group-hover/sec:opacity-100 group-focus-within/sec:opacity-100 data-[state=open]:opacity-100"
+      className="translate-x-1 opacity-0 transition-[opacity,transform,background-color,translate,scale,rotate] duration-150 group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:translate-x-0 group-focus-within/sec:opacity-100 data-[state=open]:translate-x-0 data-[state=open]:opacity-100"
     >
       <Plus size={14} />
     </IconButton>
   );
   return (
     <div className="mt-3">
-      <div className="group/sec flex h-[26px] items-center justify-between rounded-md px-2 transition-colors hover:bg-hover">
-        <button onClick={() => setExpanded(key, collapsed)} className="flex flex-1 items-center gap-1 text-left text-[12px] font-medium text-fg-3">
+      <div data-glide className="group/sec relative flex h-[26px] items-center justify-between rounded-md px-2">
+        <button
+          onClick={() => setExpanded(key, collapsed)}
+          aria-expanded={!collapsed}
+          className="flex flex-1 items-center gap-1 text-left text-[12px] font-medium text-fg-3 transition-colors duration-150 group-hover/sec:text-fg-2"
+        >
           {title}
           <ChevronRight
             size={12}
             className={cn(
-              'opacity-0 transition-[opacity,transform] group-hover/sec:opacity-100 group-focus-within/sec:opacity-100',
+              '-translate-x-0.5 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/sec:translate-x-0 group-hover/sec:opacity-100 group-focus-within/sec:opacity-100',
               !collapsed && 'rotate-90',
             )}
           />
@@ -382,7 +473,7 @@ function Section({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="overflow-hidden"
           >
             {children}
@@ -392,6 +483,13 @@ function Section({
     </div>
   );
 }
+
+/** Row class shared by every sidebar entry. The hover background comes from the glide highlight. */
+const rowClass = (active: boolean) =>
+  cn(
+    'sidebar-row group/row relative flex h-[32px] items-center gap-2 rounded-md pr-1 text-[14px] outline-offset-[-2px] transition-[background-color,color] duration-150 active:bg-active',
+    active ? 'bg-[var(--sidebar-selected)] font-medium text-fg' : 'text-fg-2 hover:text-fg',
+  );
 
 function NavRow({
   to,
@@ -403,6 +501,7 @@ function NavRow({
   expandable,
   expanded,
   onToggle,
+  badge,
 }: {
   to: string;
   icon: ReactNode;
@@ -413,21 +512,27 @@ function NavRow({
   expandable?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
+  badge?: number;
 }) {
   return (
-    <NavLink
-      to={to}
-      end={end}
-      className={({ isActive }) =>
-        cn(
-          'sidebar-row group/row relative flex h-[32px] items-center gap-2 rounded-md pr-1 text-[14px] transition-colors duration-100',
-          isActive ? 'bg-[var(--sidebar-selected)] font-medium text-fg' : 'text-fg-2 hover:bg-hover',
-        )
-      }
-      style={{ paddingLeft: 8 + depth * 14 }}
-    >
+    <NavLink to={to} end={end} data-glide className={({ isActive }) => rowClass(isActive)} style={{ paddingLeft: 8 + depth * 14 }}>
       <RowIcon icon={icon} expandable={expandable} expanded={expanded} onToggle={onToggle} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      <AnimatePresence initial={false}>
+        {!!badge && (
+          <motion.span
+            key={badge}
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.4, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 600, damping: 24 }}
+            aria-label={String(badge)}
+            className="mr-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--c-red-solid)] px-1 text-[11px] font-semibold tabular-nums text-white"
+          >
+            {badge > 99 ? '99+' : badge}
+          </motion.span>
+        )}
+      </AnimatePresence>
       {actions && <RowActions>{actions}</RowActions>}
     </NavLink>
   );
@@ -440,8 +545,8 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
     <span className="relative flex h-5 w-5 shrink-0 items-center justify-center text-fg-3">
       <span
         className={cn(
-          'flex items-center justify-center transition-opacity duration-100',
-          expandable && 'group-hover/row:opacity-0 group-focus-within/row:opacity-0',
+          'flex items-center justify-center transition-[opacity,transform,translate,scale,rotate] duration-150 ease-out',
+          expandable ? 'group-hover/row:scale-75 group-hover/row:opacity-0 group-focus-within/row:opacity-0' : 'group-hover/row:scale-110',
         )}
       >
         {icon}
@@ -455,9 +560,12 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
             e.stopPropagation();
             onToggle?.();
           }}
-          className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity duration-100 hover:bg-active group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+          className="absolute inset-0 flex scale-75 items-center justify-center rounded opacity-0 transition-[opacity,transform,background-color,translate,scale,rotate] duration-150 ease-out hover:bg-active group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:scale-100 group-focus-within/row:opacity-100"
         >
-          <ChevronRight size={14} className={cn('transition-transform duration-150', expanded && 'rotate-90')} />
+          <ChevronRight
+            size={14}
+            className={cn('transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)]', expanded && 'rotate-90')}
+          />
         </button>
       )}
     </span>
@@ -467,7 +575,7 @@ function RowIcon({ icon, expandable, expanded, onToggle }: { icon: ReactNode; ex
 function RowActions({ children }: { children: ReactNode }) {
   return (
     <span
-      className="flex items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100 has-[[data-state=open]]:opacity-100"
+      className="flex translate-x-1.5 items-center gap-0.5 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 ease-out group-hover/row:translate-x-0 group-hover/row:opacity-100 group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100 has-[[data-state=open]]:translate-x-0 has-[[data-state=open]]:opacity-100 [&>*]:hover:bg-active"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -476,6 +584,31 @@ function RowActions({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
+}
+
+/** Teammates currently looking at something inside this project. */
+function ProjectPresence({ projectId }: { projectId: ID }) {
+  const peers = usePresence((s) => s.peers);
+  const meId = useData((s) => s.meId);
+  const people = useData((s) => s.people);
+  const here = peers.filter((p) => p.id !== meId && peerProjectId(p.path) === projectId && people[p.id]);
+  if (!here.length) return null;
+  return (
+    <span className="mr-1 flex items-center transition-opacity duration-150 group-hover/row:opacity-0" title={here.map((p) => p.name).join(', ')}>
+      {here.slice(0, 3).map((p, i) => (
+        <Avatar key={p.id} person={people[p.id]} size={16} ring className={i ? '-ml-1' : ''} />
+      ))}
+    </span>
+  );
+}
+
+function peerProjectId(path: string): ID | undefined {
+  const [, section, id] = /^\/(p|items|docs)\/([^/?#]+)/.exec(path) ?? [];
+  if (section === 'p') return id;
+  const s = useData.getState();
+  if (section === 'items') return s.items[id]?.projectId;
+  if (section === 'docs') return s.docs[id]?.projectId;
+  return undefined;
 }
 
 function InlineRename({ value, placeholder, onDone }: { value: string; placeholder: string; onDone: (v: string | null) => void }) {
@@ -567,8 +700,9 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
             }
             setDrag(null);
           }}
+          data-glide
           className={cn(
-            'sidebar-row group/row relative flex h-[32px] cursor-pointer select-none items-center gap-2 rounded-md pl-2 pr-1 text-[14px] font-medium text-fg-2 transition-colors hover:bg-hover',
+            'sidebar-row group/row relative flex h-[32px] cursor-pointer select-none items-center gap-2 rounded-md pl-2 pr-1 text-[14px] font-medium text-fg-2 transition-[background-color,color,box-shadow] duration-150 hover:text-fg active:bg-active',
             hint && 'bg-accent-soft ring-1 ring-accent/50',
           )}
         >
@@ -579,7 +713,10 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
             onChange={(v) => updateGroup(group.id, { icon: v ?? '📂' })}
             allowRemove={false}
           >
-            <button onClick={(e) => e.stopPropagation()} className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-active">
+            <button
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-[background-color,transform,translate,scale,rotate] duration-150 hover:bg-active group-hover/row:scale-105"
+            >
               <PageIcon icon={group.icon} size={16} />
             </button>
           </IconPicker>
@@ -596,7 +733,13 @@ function GroupBlock({ group, onNewProject }: { group: ProjectGroup; onNewProject
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1">
               <span className="truncate">{group.name || t('group.untitled')}</span>
-              <ChevronDown size={13} className={cn('shrink-0 text-fg-4 transition-transform duration-150', !expanded && '-rotate-90')} />
+              <ChevronDown
+                size={13}
+                className={cn(
+                  'shrink-0 text-fg-4 transition-[transform,color,translate,scale,rotate] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/row:text-fg-3',
+                  !expanded && '-rotate-90',
+                )}
+              />
             </span>
           )}
           {!renaming && (
@@ -790,11 +933,8 @@ function ProjectRow({ project, depth = 0 }: { project: Project; depth?: number }
             e.preventDefault();
             setRenaming(project.id);
           }}
-          className={cn(
-            'sidebar-row group/row relative flex h-[32px] items-center gap-2 rounded-md pr-1 text-[14px] transition-colors duration-100',
-            inProject && !expanded ? 'bg-active font-medium text-fg' : 'text-fg-2 hover:bg-hover',
-            drag?.id === project.id && 'opacity-40',
-          )}
+          data-glide
+          className={cn(rowClass(inProject && !expanded), drag?.id === project.id && 'opacity-40')}
           style={{ paddingLeft: 8 + depth * 14 }}
         >
           {hint && hint.pos !== 'inside' && <DropLine pos={hint.pos} />}
@@ -811,6 +951,7 @@ function ProjectRow({ project, depth = 0 }: { project: Project; depth?: number }
           ) : (
             <span className="min-w-0 flex-1 truncate">{project.name || t('project.untitled')}</span>
           )}
+          {!renaming && <ProjectPresence projectId={project.id} />}
           {!renaming && (
             <RowActions>
               <EntriesMenu
@@ -951,12 +1092,8 @@ function DocRow({ doc, depth, onAddChild }: { doc: Doc; depth: number; onAddChil
             setRenaming(doc.id);
           }}
           // Radix Slot (context menu trigger) can't merge NavLink's function className, so compute it here.
-          className={cn(
-            'sidebar-row group/row relative flex h-[32px] items-center gap-2 rounded-md pr-1 text-[14px] transition-colors duration-100',
-            isActive ? 'bg-[var(--sidebar-selected)] font-medium text-fg' : 'text-fg-2 hover:bg-hover',
-            hint?.pos === 'inside' && 'bg-accent-soft ring-1 ring-accent/50',
-            drag?.id === doc.id && 'opacity-40',
-          )}
+          data-glide
+          className={cn(rowClass(isActive), hint?.pos === 'inside' && 'bg-accent-soft ring-1 ring-accent/50', drag?.id === doc.id && 'opacity-40')}
           style={{ paddingLeft: 8 + depth * 14 }}
         >
           {hint && hint.pos !== 'inside' && <DropLine pos={hint.pos} />}

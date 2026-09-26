@@ -15,6 +15,8 @@ import {
   Search,
   Settings,
   FileText,
+  Inbox,
+  IterationCw,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -37,6 +39,7 @@ export function CommandPalette() {
   const items = useData((s) => s.items);
   const files = useData((s) => s.files);
   const docs = useData((s) => s.docs);
+  const sprints = useData((s) => s.sprints);
   const recent = useData((s) => s.prefs.recent);
   const setPrefs = useData((s) => s.setPrefs);
   const createProject = useData((s) => s.createProject);
@@ -71,8 +74,13 @@ export function CommandPalette() {
         Object.values(docs).filter((d) => matches(`${d.title} ${blocksToText(d.content, 600)}`, q)),
         5,
       ),
+      sprints: lim(
+        Object.values(sprints).filter((sp) => sp.status !== 'completed' && projects[sp.projectId] && matches(`${sp.name} ${sp.goal ?? ''}`, q)),
+        4,
+      ),
     };
-  }, [q, projects, items, files, docs]);
+  }, [q, projects, items, files, docs, sprints]);
+  const activeSprints = Object.values(sprints).filter((sp) => sp.status === 'active' && projects[sp.projectId] && !projects[sp.projectId].archived);
 
   const recentEntries = recent
     .map((r) => {
@@ -165,6 +173,21 @@ export function CommandPalette() {
                         ))}
                       </Command.Group>
                     )}
+                    {results.sprints.length > 0 && (
+                      <Command.Group heading={t('tab.sprints')}>
+                        {results.sprints.map((sp) => (
+                          <Row
+                            key={sp.id}
+                            value={`s-${sp.id}`}
+                            icon={<IterationCw size={15} />}
+                            hint={projects[sp.projectId]?.name}
+                            onSelect={() => run(() => navigate(`/p/${sp.projectId}/sprints`))}
+                          >
+                            {sp.name}
+                          </Row>
+                        ))}
+                      </Command.Group>
+                    )}
                     {results.docs.length > 0 && (
                       <Command.Group heading={t('cmd.docs')}>
                         {results.docs.map((d) => (
@@ -241,18 +264,25 @@ export function CommandPalette() {
                 })()}
 
                 {(() => {
-                  const nav = [
-                    { k: 'my-work', icon: <ListTodo size={16} />, label: t('nav.myWork'), to: '/my-work' },
-                    { k: 'home', icon: <House size={16} />, label: t('nav.home'), to: '/' },
-                    { k: 'cal', icon: <CalendarDays size={16} />, label: t('nav.calendar'), to: '/calendar' },
-                    { k: 'road', icon: <ChartGantt size={16} />, label: t('nav.roadmap'), to: '/roadmap' },
-                    { k: 'files', icon: <FolderOpen size={16} />, label: t('nav.files'), to: '/files' },
+                  const nav: { k: string; icon: ReactNode; label: string; to: string; sc?: string }[] = [
+                    { k: 'inbox', icon: <Inbox size={16} />, label: t('nav.inbox'), to: '/inbox', sc: 'G I' },
+                    { k: 'my-work', icon: <ListTodo size={16} />, label: t('nav.myWork'), to: '/my-work', sc: 'G M' },
+                    { k: 'home', icon: <House size={16} />, label: t('nav.home'), to: '/', sc: 'G H' },
+                    ...activeSprints.map((sp) => ({
+                      k: `sprint-${sp.id}`,
+                      icon: <IterationCw size={16} />,
+                      label: `${sp.name} · ${projects[sp.projectId].name}`,
+                      to: `/p/${sp.projectId}/sprints`,
+                    })),
+                    { k: 'cal', icon: <CalendarDays size={16} />, label: t('nav.calendar'), to: '/calendar', sc: 'G C' },
+                    { k: 'road', icon: <ChartGantt size={16} />, label: t('nav.roadmap'), to: '/roadmap', sc: 'G R' },
+                    { k: 'files', icon: <FolderOpen size={16} />, label: t('nav.files'), to: '/files', sc: 'G F' },
                     { k: 'set', icon: <Settings size={16} />, label: t('nav.settings'), to: '/settings' },
                   ].filter((a) => !q || matches(a.label, q));
                   return nav.length ? (
                     <Command.Group heading={t('cmd.navigation')}>
                       {nav.map((a) => (
-                        <Row key={a.k} value={`nav-${a.k}`} icon={a.icon} onSelect={() => run(() => navigate(a.to))}>
+                        <Row key={a.k} value={`nav-${a.k}`} icon={a.icon} shortcut={a.sc} onSelect={() => run(() => navigate(a.to))}>
                           {t('cmd.go', { name: a.label })}
                         </Row>
                       ))}

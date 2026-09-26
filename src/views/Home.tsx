@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ArrowUpRight, FilePlus, FolderPlus, Link2, Plus } from 'lucide-react';
+import { ArrowUpRight, FilePlus, FolderPlus, IterationCw, Link2, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { useMemo, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -7,7 +7,8 @@ import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { dateLocale, useLang, useT } from '@/lib/i18n';
 import { isClosed, progressOf, refPath, refTitle, useMe, useProjectsList } from '@/lib/selectors';
-import { daysFromToday, formatShortDate, timeAgo, todayISO, toISODate } from '@/lib/dates';
+import { daysFromToday, formatRange, formatShortDate, timeAgo, todayISO, toISODate } from '@/lib/dates';
+import { sprintItems, sprintStats } from '@/lib/sprints';
 import { PROJECT_STATUS_COLOR } from '@/lib/constants';
 import { setItemStatus } from '@/lib/actions';
 import { Topbar } from '@/components/Topbar';
@@ -186,6 +187,8 @@ export function Home() {
           </motion.section>
         </div>
 
+        <ActiveSprints />
+
         {/* Projects */}
         <motion.section {...fadeUp(4)} className="mt-10">
           <SectionTitle>{t('home.projects')}</SectionTitle>
@@ -198,15 +201,18 @@ export function Home() {
                 <motion.div key={p.id} {...fadeUp(Math.min(5 + i, 8))}>
                   <Link
                     to={`/p/${p.id}/overview`}
-                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-colors hover:border-line-strong hover:bg-subtle"
+                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-[border-color,background-color,box-shadow,transform,translate,scale,rotate] duration-200 ease-out hover:-translate-y-0.5 hover:border-line-strong hover:bg-subtle hover:shadow-sm active:translate-y-0"
                   >
                     <div className="relative p-4">
-                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-subtle text-[24px]">
+                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-subtle text-[24px] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:-rotate-6 group-hover:scale-110">
                         <PageIcon icon={p.icon} size={26} />
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="truncate text-[15px] font-semibold">{p.name || t('project.untitled')}</div>
-                        <ArrowUpRight size={16} className="shrink-0 text-fg-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <ArrowUpRight
+                          size={16}
+                          className="shrink-0 -translate-x-1 translate-y-1 text-fg-4 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-200 group-hover:translate-x-0 group-hover:translate-y-0 group-hover:opacity-100"
+                        />
                       </div>
                       <div className="mt-0.5 h-5 truncate text-[13px] text-fg-3">{p.summary}</div>
                       <div className="mt-3 flex items-center justify-between">
@@ -362,5 +368,54 @@ function FocusRow({
         </span>
       )}
     </motion.div>
+  );
+}
+
+/** Every running sprint across projects, so leads see all teams at a glance. */
+function ActiveSprints() {
+  const t = useT();
+  const lang = useLang();
+  const sprints = useData((s) => s.sprints);
+  const projects = useData((s) => s.projects);
+  const items = useData((s) => s.items);
+  const active = Object.values(sprints).filter((sp) => sp.status === 'active' && projects[sp.projectId] && !projects[sp.projectId].archived);
+  if (!active.length) return null;
+  return (
+    <motion.section {...fadeUp(4)} className="mt-10">
+      <SectionTitle>{t('home.activeSprints')}</SectionTitle>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {active.map((sp) => {
+          const list = sprintItems(sp.id, items);
+          const stats = sprintStats(sp, list);
+          const project = projects[sp.projectId];
+          return (
+            <Link
+              key={sp.id}
+              to={`/p/${sp.projectId}/sprints`}
+              className="group rounded-xl border border-line p-4 transition-[border-color,background-color,transform,box-shadow,translate,scale,rotate] duration-200 hover:-translate-y-0.5 hover:border-line-strong hover:bg-subtle hover:shadow-sm"
+            >
+              <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
+                <PageIcon icon={project.icon} size={14} />
+                <span className="truncate">{project.name}</span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <IterationCw size={15} className="shrink-0 text-accent transition-transform duration-500 group-hover:rotate-180" />
+                <span className="truncate text-[15px] font-semibold">{sp.name}</span>
+                <span className="ml-auto shrink-0 text-[12px] text-fg-3">{formatRange(sp.startDate, sp.endDate, lang)}</span>
+              </div>
+              {sp.goal && <div className="mt-1 line-clamp-2 text-[13px] text-fg-2">{sp.goal}</div>}
+              <div className="mt-3 flex items-center gap-2">
+                <Progress value={stats.ratio} color="blue" />
+                <span className="shrink-0 text-[12px] tabular-nums text-fg-3">{Math.round(stats.ratio * 100)}%</span>
+              </div>
+              <div className="mt-2 flex justify-between text-[12px] text-fg-3">
+                <span>{t('sprint.progress', { done: stats.done, total: stats.total })}</span>
+                <span>{stats.daysLeft > 0 ? t('sprint.daysLeft', { n: stats.daysLeft }) : t('sprint.lastDay')}</span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </motion.section>
   );
 }

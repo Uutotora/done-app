@@ -3,7 +3,21 @@ import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
 import { shiftISO, todayISO } from './dates';
 import { nowIso, uid } from './utils';
-import type { DataState, Doc, FileNode, ID, Item, Lang, Person, PlaneIssueLite, PlaneSnapshot, PlaneStateLite, Project } from './types';
+import type {
+  AppNotification,
+  DataState,
+  Doc,
+  Sprint,
+  FileNode,
+  ID,
+  Item,
+  Lang,
+  Person,
+  PlaneIssueLite,
+  PlaneSnapshot,
+  PlaneStateLite,
+  Project,
+} from './types';
 
 export interface OnboardingInput {
   lang: Lang;
@@ -149,6 +163,7 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
       priority: 'none',
       tags: [],
       order: order++,
+      createdBy: data.meId,
       createdAt: ts,
       updatedAt: ts,
       ...p,
@@ -601,6 +616,97 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
   act(phone, igor, 'status', 60 * 24 * 6, 'planned', 'in_progress');
   act(doubleCharge, elena, 'created', 60 * 24 * 3);
   act(doubleCharge, igor, 'status', 60 * 5, 'in_progress', 'in_review');
+
+  // ---- Sprints: two finished, one running, one being planned
+  const sprint = (name: string, start: number, end: number, status: Sprint['status'], extra: Partial<Sprint> = {}): ID => {
+    const id = uid('sp');
+    data.sprints[id] = { id, projectId: mobile, name, startDate: d(start), endDate: d(end), status, createdAt: ts, updatedAt: ts, ...extra };
+    return id;
+  };
+  sprint(L('Спринт 13', 'Sprint 13'), -34, -21, 'completed', {
+    completedCount: 9,
+    completedAt: ago(60 * 24 * 21),
+    goal: L('Новый экран онбординга в проде', 'New onboarding screen in production'),
+  });
+  sprint(L('Спринт 14', 'Sprint 14'), -20, -7, 'completed', {
+    completedCount: 11,
+    completedAt: ago(60 * 24 * 7),
+    goal: L('Стабилизировать запуск и починить краши', 'Stabilize startup and fix crashes'),
+  });
+  const currentSprint = sprint(L('Спринт 15', 'Sprint 15'), -6, 7, 'active', {
+    goal: L('Вход по номеру телефона в бете и фикс двойного списания', 'Phone sign-up in beta and the double charge fixed'),
+  });
+  const nextSprint = sprint(L('Спринт 16', 'Sprint 16'), 8, 21, 'planned', {
+    goal: L('Apple Pay и Google Pay для 10% пользователей', 'Apple Pay and Google Pay for 10% of users'),
+  });
+  let doneDaysAgo = 5;
+  for (const it of Object.values(data.items)) {
+    if (it.projectId !== mobile || it.type === 'initiative' || it.type === 'milestone') continue;
+    if (it.status === 'done') {
+      it.sprintId = currentSprint;
+      it.completedAt = ago(60 * 24 * doneDaysAgo);
+      doneDaysAgo = Math.max(1, doneDaysAgo - 2);
+    } else if (it.status === 'in_progress' || it.status === 'in_review' || (it.status === 'planned' && !!it.dueDate && it.dueDate <= d(7))) {
+      it.sprintId = currentSprint;
+    } else if (it.status === 'planned' || (it.status === 'backlog' && (it.priority === 'high' || it.priority === 'urgent'))) {
+      it.sprintId = nextSprint;
+    }
+  }
+
+  // ---- Inbox: what teammates sent your way while you were away
+  const myName = data.people[data.meId].name;
+  const mentionText = L(
+    `@${myName}, посмотри состояния ошибки в макете. Если ок, отдаю в разработку.`,
+    `@${myName}, could you check the error states in the mockup? If it looks good I will hand it off.`,
+  );
+  const mentionId = uid('cm');
+  data.comments[mentionId] = {
+    id: mentionId,
+    targetKind: 'item',
+    targetId: phone,
+    authorId: anna,
+    text: mentionText,
+    mentions: [data.meId],
+    createdAt: ago(22),
+  };
+  const metrics = Object.values(data.items).find((i) => i.assigneeId === data.meId && i.type === 'task' && i.dueDate === d(0));
+  const notify = (n: Omit<AppNotification, 'id' | 'recipientId' | 'createdAt'> & { minutesAgo: number; read?: boolean }) => {
+    const id = uid('nt');
+    const { minutesAgo, read, ...rest } = n;
+    data.notifications[id] = { ...rest, id, recipientId: data.meId, createdAt: ago(minutesAgo), ...(read ? { readAt: ago(minutesAgo - 1) } : {}) };
+  };
+  notify({ kind: 'mention', actorId: anna, targetKind: 'item', targetId: phone, projectId: mobile, text: mentionText, minutesAgo: 22 });
+  if (metrics) notify({ kind: 'assigned', actorId: dima, targetKind: 'item', targetId: metrics.id, projectId: mobile, minutesAgo: 70 });
+  notify({
+    kind: 'comment',
+    actorId: igor,
+    targetKind: 'item',
+    targetId: doubleCharge,
+    projectId: mobile,
+    text: L('Нашел причину: ретрай без ключа идемпотентности. Фикс на ревью.', 'Found it: retry without an idempotency key. Fix is in review.'),
+    minutesAgo: 95,
+  });
+  notify({
+    kind: 'status',
+    actorId: igor,
+    targetKind: 'item',
+    targetId: doubleCharge,
+    projectId: mobile,
+    text: 'in_review',
+    minutesAgo: 300,
+    read: true,
+  });
+  notify({ kind: 'status', actorId: anna, targetKind: 'item', targetId: tour, projectId: mobile, text: 'planned', minutesAgo: 60 * 26, read: true });
+  notify({
+    kind: 'sprint',
+    actorId: dima,
+    targetKind: 'project',
+    targetId: mobile,
+    projectId: mobile,
+    text: data.sprints[currentSprint].name,
+    minutesAgo: 60 * 24 * 6,
+    read: true,
+  });
 
   // ---- Docs
   const doc = (p: Omit<Doc, 'id' | 'createdAt' | 'updatedAt' | 'order'>): ID => {

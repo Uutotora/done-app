@@ -26,6 +26,8 @@ interface UIState {
   hydrated: boolean;
   mobileSidebarOpen: boolean;
   setMobileSidebar: (open: boolean) => void;
+  /** Collapsed sidebar floating over the page while the pointer is near the left edge. */
+  sidebarPeek: boolean;
   peekItemId?: ID;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
@@ -52,6 +54,7 @@ export const useUI = create<UIState>()((set) => ({
   hydrated: false,
   mobileSidebarOpen: false,
   setMobileSidebar: (open) => set({ mobileSidebarOpen: open }),
+  sidebarPeek: false,
   paletteOpen: false,
   shortcutsOpen: false,
   createItem: { open: false },
@@ -72,3 +75,25 @@ export const useUI = create<UIState>()((set) => ({
 }));
 
 export const toast = (t: Omit<Toast, 'id'>) => useUI.getState().toast(t);
+
+let peekTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Shows the floating sidebar (collapsed mode) after a short hover intent delay. */
+export function showSidebarPeek(delay = 0) {
+  clearTimeout(peekTimer);
+  if (useUI.getState().sidebarPeek) return;
+  if (!delay) useUI.setState({ sidebarPeek: true });
+  else peekTimer = setTimeout(() => useUI.setState({ sidebarPeek: true }), delay);
+}
+
+/** Hides the floating sidebar unless a menu opened from it or an inline rename is still in use. */
+export function hideSidebarPeek(delay = 280) {
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(function check() {
+    const busy =
+      document.querySelector('[data-radix-popper-content-wrapper]') ||
+      (document.activeElement instanceof HTMLInputElement && document.activeElement.closest('.sidebar-floating'));
+    if (busy) peekTimer = setTimeout(check, 250);
+    else useUI.setState({ sidebarPeek: false });
+  }, delay);
+}

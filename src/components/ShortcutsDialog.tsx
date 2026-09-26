@@ -12,6 +12,10 @@ export function ShortcutsDialog() {
   const rows: [TKey, string[]][] = [
     ['shortcuts.palette', [mod, 'K']],
     ['shortcuts.newItem', ['C']],
+    ['shortcuts.goInbox', ['G', 'I']],
+    ['shortcuts.goMyWork', ['G', 'M']],
+    ['shortcuts.goHome', ['G', 'H']],
+    ['shortcuts.inboxActions', ['E', 'U']],
     ['shortcuts.sidebar', [mod, '\\']],
     ['shortcuts.theme', [mod, '⇧', 'L']],
     ['shortcuts.slash', ['/']],
@@ -27,8 +31,8 @@ export function ShortcutsDialog() {
             <div key={k} className="flex h-9 items-center justify-between rounded-md px-2 hover:bg-hover">
               <span className="text-[14px] text-fg-2">{t(k)}</span>
               <span className="flex gap-1">
-                {keys.map((key) => (
-                  <Kbd key={key} className="h-[22px] min-w-[22px] text-[12px]">
+                {keys.map((key, i) => (
+                  <Kbd key={`${key}${i}`} className="h-[22px] min-w-[22px] text-[12px]">
                     {key}
                   </Kbd>
                 ))}

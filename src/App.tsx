@@ -12,11 +12,13 @@ import { Splash } from '@/components/Logo';
 import { AuthGate } from '@/components/AuthGate';
 import { Home } from '@/views/Home';
 import { MyWork } from '@/views/MyWork';
+import { InboxView } from '@/views/Inbox';
 import { ProjectLayout } from '@/views/project/ProjectLayout';
 import { Overview } from '@/views/project/Overview';
 import { RoadmapView } from '@/views/Roadmap';
 import { BacklogView } from '@/views/Backlog';
 import { BoardView } from '@/views/Board';
+import { SprintsView } from '@/views/Sprints';
 import { CalendarView } from '@/views/Calendar';
 import { DocsView } from '@/views/Docs';
 import { FilesView } from '@/views/Files';
@@ -89,6 +91,7 @@ export function App() {
               <Routes>
                 <Route element={<AppShell />}>
                   <Route index element={<Home />} />
+                  <Route path="inbox" element={<InboxView />} />
                   <Route path="my-work" element={<MyWork />} />
                   <Route path="calendar" element={<CalendarView />} />
                   <Route path="roadmap" element={<RoadmapView />} />
@@ -103,6 +106,7 @@ export function App() {
                     <Route path="roadmap" element={<RoadmapView />} />
                     <Route path="backlog" element={<BacklogView />} />
                     <Route path="board" element={<BoardView />} />
+                    <Route path="sprints" element={<SprintsView />} />
                     <Route path="calendar" element={<CalendarView />} />
                     <Route path="map" element={<Lazy el={<MapView />} />} />
                     <Route path="docs" element={<DocsView />} />

@@ -9,6 +9,7 @@ import type {
   Activity,
   ActivityKind,
   AiConfig,
+  AppNotification,
   Comment,
   CommentTarget,
   DataState,
@@ -25,12 +26,13 @@ import type {
   ProjectGroup,
   ProjectMap,
   Ref,
+  Sprint,
   TrashEntry,
   TrashKind,
   Workspace,
 } from './types';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 const ACTIVITY_LIMIT = 3000;
 const TRASH_TTL_DAYS = 30;
 
@@ -48,7 +50,9 @@ export function createEmptyData(lang: Lang, name = ''): DataState {
     docs: {},
     files: {},
     maps: {},
+    sprints: {},
     comments: {},
+    notifications: {},
     activity: [],
     trash: [],
     plane: {
@@ -76,6 +80,7 @@ export interface Snapshot {
   docs?: Record<ID, Doc>;
   files?: Record<ID, FileNode>;
   maps?: Record<ID, ProjectMap>;
+  sprints?: Record<ID, Sprint>;
   comments?: Record<ID, Comment>;
 }
 
@@ -125,9 +130,19 @@ export interface Actions {
 
   setMap: (projectId: ID, map: Omit<ProjectMap, 'updatedAt'>) => void;
 
-  addComment: (targetKind: CommentTarget, targetId: ID, text: string) => ID;
+  addComment: (targetKind: CommentTarget, targetId: ID, text: string, mentions?: ID[]) => ID;
   updateComment: (id: ID, text: string) => void;
   deleteComment: (id: ID) => void;
+
+  createSprint: (projectId: ID, patch?: Partial<Sprint>) => ID;
+  updateSprint: (id: ID, patch: Partial<Sprint>) => void;
+  startSprint: (id: ID) => void;
+  /** Closes the sprint and moves unfinished work to the next sprint or back to the backlog. Returns the next sprint id. */
+  completeSprint: (id: ID, carryOver: 'next' | 'backlog') => ID | undefined;
+  deleteSprint: (id: ID) => Snapshot;
+
+  markNotifications: (ids: ID[], read: boolean) => void;
+  archiveNotifications: (ids: ID[], archived: boolean) => void;
 
   pushTrash: (kind: TrashKind, title: string, icon: string | undefined, snapshot: Snapshot) => ID;
   restoreTrash: (entryId: ID) => void;
@@ -211,6 +226,54 @@ function withActivity(list: Activity[], add: Activity[]): Activity[] {
   if (!add.length) return list;
   const next = [...list, ...add];
   return next.length > ACTIVITY_LIMIT ? next.slice(next.length - ACTIVITY_LIMIT) : next;
+}
+
+const NOTIFICATION_LIMIT = 400;
+
+/** Inbox entries for teammates. Never notifies the actor and skips duplicates within one action. */
+function notifyAll(
+  s: DataState,
+  drafts: Omit<AppNotification, 'id' | 'createdAt' | 'actorId'>[],
+  at: string,
+): Record<ID, AppNotification> | undefined {
+  const seen = new Set<string>();
+  const add: AppNotification[] = [];
+  for (const d of drafts) {
+    const key = `${d.recipientId}:${d.targetId}:${d.kind}`;
+    if (d.recipientId === s.meId || !s.people[d.recipientId] || seen.has(key)) continue;
+    seen.add(key);
+    add.push({ ...d, id: uid('nt'), actorId: s.meId, createdAt: at });
+  }
+  if (!add.length) return undefined;
+  let all = [...Object.values(s.notifications ?? {}), ...add];
+  if (all.length > NOTIFICATION_LIMIT * 4) all = all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, NOTIFICATION_LIMIT * 4);
+  return Object.fromEntries(all.map((n) => [n.id, n]));
+}
+
+function itemNotifications(prev: Item | undefined, next: Item, bulk: boolean): Omit<AppNotification, 'id' | 'createdAt' | 'actorId'>[] {
+  const out: Omit<AppNotification, 'id' | 'createdAt' | 'actorId'>[] = [];
+  const base = { targetKind: 'item' as const, targetId: next.id, projectId: next.projectId };
+  const reassigned = !!next.assigneeId && next.assigneeId !== prev?.assigneeId;
+  if (reassigned) out.push({ ...base, kind: 'assigned', recipientId: next.assigneeId! });
+  if (prev && !bulk && next.status !== prev.status) {
+    for (const r of new Set([next.assigneeId, next.createdBy])) {
+      // A new assignee already hears about the task through the assignment.
+      if (r && !(reassigned && r === next.assigneeId)) out.push({ ...base, kind: 'status', recipientId: r, text: next.status });
+    }
+  }
+  return out;
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const localDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return localDate(new Date(y, m - 1, d + days));
+}
+
+function todayIso(): string {
+  return localDate(new Date());
 }
 
 export const useData = create<Store>()(
@@ -346,6 +409,7 @@ export const useData = create<Store>()(
             projectId: copyId,
             parentId: it.parentId ? idMap.get(it.parentId) : undefined,
             dependsOn: it.dependsOn?.map((dep) => idMap.get(dep) ?? dep),
+            sprintId: undefined,
             plane: undefined,
             createdAt: ts,
             updatedAt: ts,
@@ -368,12 +432,16 @@ export const useData = create<Store>()(
         const commentIds = Object.values(s.comments)
           .filter((c) => itemIds.includes(c.targetId) || docIds.includes(c.targetId))
           .map((c) => c.id);
+        const sprintIds = Object.values(s.sprints)
+          .filter((sp) => sp.projectId === id)
+          .map((sp) => sp.id);
         const snap: Snapshot = {
           projects: pick(s.projects, [id]),
           items: pick(s.items, itemIds),
           docs: pick(s.docs, docIds),
           files: pick(s.files, fileIds),
           maps: pick(s.maps, [id]),
+          sprints: pick(s.sprints, sprintIds),
           comments: pick(s.comments, commentIds),
         };
         set({
@@ -382,6 +450,7 @@ export const useData = create<Store>()(
           docs: omit(s.docs, docIds),
           files: omit(s.files, fileIds),
           maps: omit(s.maps, [id]),
+          sprints: omit(s.sprints, sprintIds),
           comments: omit(s.comments, commentIds),
         });
         return snap;
@@ -400,14 +469,17 @@ export const useData = create<Store>()(
           priority: 'none',
           tags: [],
           order: minOrder - 1,
+          createdBy: s.meId,
           createdAt: ts,
           updatedAt: ts,
           ...input,
         };
         if (item.status === 'done' && !item.completedAt) item.completedAt = ts;
+        if (item.sprintId && s.sprints[item.sprintId]?.projectId !== item.projectId) item.sprintId = undefined;
         set((st) => ({
           items: { ...st.items, [id]: item },
           activity: withActivity(st.activity, [{ id: uid('ac'), itemId: id, actorId: st.meId, kind: 'created', at: ts }]),
+          ...(item.assigneeId ? { notifications: notifyAll(st, itemNotifications(undefined, item, false), ts) ?? st.notifications } : {}),
         }));
         return id;
       },
@@ -418,6 +490,7 @@ export const useData = create<Store>()(
           const items = { ...s.items };
           const ts = nowIso();
           const acts: Activity[] = [];
+          const notes: Parameters<typeof notifyAll>[1] = [];
           const moving = new Set(ids);
           if (patch.projectId) {
             let grew = true;
@@ -438,8 +511,10 @@ export const useData = create<Store>()(
             const next: Item = { ...prev, ...changes, id, updatedAt: ts };
             if (changes.projectId && changes.projectId !== prev.projectId) {
               next.plane = undefined;
+              next.sprintId = undefined;
               if (next.parentId && !moving.has(next.parentId)) next.parentId = undefined;
             }
+            if (next.sprintId && s.sprints[next.sprintId]?.projectId !== next.projectId) next.sprintId = prev.sprintId;
             if (next.parentId) {
               const visited = new Set<ID>([id]);
               let cursor: ID | undefined = next.parentId;
@@ -458,8 +533,10 @@ export const useData = create<Store>()(
             if (changes.status && changes.status !== prev.status) next.completedAt = changes.status === 'done' ? ts : undefined;
             items[id] = next;
             acts.push(...diffActivity(prev, next, s.meId, ts));
+            notes.push(...itemNotifications(prev, next, ids.length > 1));
           }
-          return { items, activity: withActivity(s.activity, acts) };
+          const notifications = notifyAll(s, notes, ts);
+          return { items, activity: withActivity(s.activity, acts), ...(notifications ? { notifications } : {}) };
         }),
       duplicateItem: (id) => {
         const s = get();
@@ -469,6 +546,7 @@ export const useData = create<Store>()(
           ...cloneable(src),
           title: `${src.title} (${s.prefs.lang === 'ru' ? 'копия' : 'copy'})`,
           plane: undefined,
+          createdBy: s.meId,
           order: src.order + 0.5,
         });
         return nid;
@@ -510,7 +588,7 @@ export const useData = create<Store>()(
         const id = uid('dc');
         const ts = nowIso();
         const siblings = Object.values(get().docs).filter((d) => d.parentId === patch.parentId && d.projectId === patch.projectId);
-        const doc: Doc = { id, title: '', order: maxOrder(siblings) + 1, createdAt: ts, updatedAt: ts, ...patch };
+        const doc: Doc = { id, title: '', order: maxOrder(siblings) + 1, createdBy: get().meId, createdAt: ts, updatedAt: ts, ...patch };
         set((s) => ({ docs: { ...s.docs, [id]: doc } }));
         return id;
       },
@@ -640,15 +718,167 @@ export const useData = create<Store>()(
 
       setMap: (projectId, map) => set((s) => ({ maps: { ...s.maps, [projectId]: { ...map, updatedAt: nowIso() } } })),
 
-      addComment: (targetKind, targetId, text) => {
+      addComment: (targetKind, targetId, text, mentions = []) => {
         const id = uid('cm');
-        const c: Comment = { id, targetKind, targetId, text, authorId: get().meId, createdAt: nowIso() };
-        set((s) => ({ comments: { ...s.comments, [id]: c } }));
+        const ts = nowIso();
+        const s = get();
+        const mentioned = [...new Set(mentions)].filter((p) => s.people[p]);
+        const c: Comment = { id, targetKind, targetId, text, authorId: s.meId, createdAt: ts, ...(mentioned.length ? { mentions: mentioned } : {}) };
+        const target = targetKind === 'item' ? s.items[targetId] : s.docs[targetId];
+        const excerpt = text.length > 160 ? `${text.slice(0, 157)}…` : text;
+        const base = { targetKind, targetId, projectId: target?.projectId, text: excerpt };
+        const followers = new Set<ID>();
+        if (targetKind === 'item' && s.items[targetId]?.assigneeId) followers.add(s.items[targetId].assigneeId!);
+        if (target?.createdBy) followers.add(target.createdBy);
+        for (const other of Object.values(s.comments)) if (other.targetId === targetId) followers.add(other.authorId);
+        for (const p of mentioned) followers.delete(p);
+        const notifications = notifyAll(
+          s,
+          [
+            ...mentioned.map((recipientId) => ({ ...base, kind: 'mention' as const, recipientId })),
+            ...[...followers].map((recipientId) => ({ ...base, kind: 'comment' as const, recipientId })),
+          ],
+          ts,
+        );
+        set((st) => ({ comments: { ...st.comments, [id]: c }, ...(notifications ? { notifications } : {}) }));
         return id;
       },
       updateComment: (id, text) =>
         set((s) => (s.comments[id] ? { comments: { ...s.comments, [id]: { ...s.comments[id], text, editedAt: nowIso() } } } : {})),
       deleteComment: (id) => set((s) => ({ comments: omit(s.comments, [id]) })),
+
+      createSprint: (projectId, patch = {}) => {
+        const s = get();
+        const id = uid('sp');
+        const ts = nowIso();
+        const siblings = Object.values(s.sprints)
+          .filter((sp) => sp.projectId === projectId)
+          .sort((a, b) => a.endDate.localeCompare(b.endDate));
+        const last = siblings.at(-1);
+        const today = todayIso();
+        const startDate = patch.startDate ?? (last && last.endDate >= today ? addDays(last.endDate, 1) : today);
+        const sprint: Sprint = {
+          id,
+          projectId,
+          name: `${s.prefs.lang === 'ru' ? 'Спринт' : 'Sprint'} ${siblings.length + 1}`,
+          startDate,
+          endDate: addDays(startDate, 13),
+          status: 'planned',
+          createdAt: ts,
+          updatedAt: ts,
+          ...patch,
+        };
+        set((st) => ({ sprints: { ...st.sprints, [id]: sprint } }));
+        return id;
+      },
+      updateSprint: (id, patch) =>
+        set((s) => (s.sprints[id] ? { sprints: { ...s.sprints, [id]: { ...s.sprints[id], ...patch, updatedAt: nowIso() } } } : {})),
+      startSprint: (id) =>
+        set((s) => {
+          const sprint = s.sprints[id];
+          if (!sprint || sprint.status !== 'planned') return {};
+          if (Object.values(s.sprints).some((sp) => sp.projectId === sprint.projectId && sp.status === 'active')) return {};
+          const ts = nowIso();
+          const today = todayIso();
+          const length = Math.max(0, Math.round((new Date(sprint.endDate).getTime() - new Date(sprint.startDate).getTime()) / 86400000));
+          const startDate = sprint.startDate > today ? today : sprint.startDate;
+          const endDate = sprint.startDate > today ? addDays(today, length) : sprint.endDate;
+          const assignees = new Set(
+            Object.values(s.items)
+              .filter((i) => i.sprintId === id && i.assigneeId)
+              .map((i) => i.assigneeId!),
+          );
+          const notifications = notifyAll(
+            s,
+            [...assignees].map((recipientId) => ({
+              kind: 'sprint' as const,
+              recipientId,
+              targetKind: 'project' as const,
+              targetId: sprint.projectId,
+              projectId: sprint.projectId,
+              text: sprint.name,
+            })),
+            ts,
+          );
+          return {
+            sprints: { ...s.sprints, [id]: { ...sprint, status: 'active', startDate, endDate, updatedAt: ts } },
+            ...(notifications ? { notifications } : {}),
+          };
+        }),
+      completeSprint: (id, carryOver) => {
+        const s = get();
+        const sprint = s.sprints[id];
+        if (!sprint || sprint.status === 'completed') return undefined;
+        const ts = nowIso();
+        const inSprint = Object.values(s.items).filter((i) => i.sprintId === id);
+        const open = inSprint.filter((i) => i.status !== 'done' && i.status !== 'canceled');
+        let nextId: ID | undefined;
+        if (carryOver === 'next') {
+          nextId = Object.values(s.sprints)
+            .filter((sp) => sp.projectId === sprint.projectId && sp.status === 'planned')
+            .sort((a, b) => a.startDate.localeCompare(b.startDate))[0]?.id;
+          if (!nextId)
+            nextId = get().createSprint(sprint.projectId, { startDate: addDays(sprint.endDate > todayIso() ? todayIso() : sprint.endDate, 1) });
+        }
+        set((st) => {
+          const items = { ...st.items };
+          for (const it of open) items[it.id] = { ...items[it.id], sprintId: nextId, updatedAt: ts };
+          return {
+            items,
+            sprints: {
+              ...st.sprints,
+              [id]: { ...sprint, status: 'completed', completedAt: ts, completedCount: inSprint.length - open.length, updatedAt: ts },
+            },
+          };
+        });
+        return nextId;
+      },
+      deleteSprint: (id) => {
+        const s = get();
+        const linked = Object.values(s.items).filter((i) => i.sprintId === id);
+        const snap: Snapshot = {
+          sprints: pick(s.sprints, [id]),
+          items: pick(
+            s.items,
+            linked.map((i) => i.id),
+          ),
+        };
+        const items = { ...s.items };
+        for (const it of linked) items[it.id] = { ...it, sprintId: undefined };
+        set({ sprints: omit(s.sprints, [id]), items });
+        return snap;
+      },
+
+      markNotifications: (ids, read) =>
+        set((s) => {
+          const ts = nowIso();
+          const notifications = { ...s.notifications };
+          let changed = false;
+          for (const id of ids) {
+            const n = notifications[id];
+            if (!n || n.recipientId !== s.meId || !!n.readAt === read) continue;
+            const next = { ...n };
+            if (read) next.readAt = ts;
+            else delete next.readAt;
+            notifications[id] = next;
+            changed = true;
+          }
+          return changed ? { notifications } : {};
+        }),
+      archiveNotifications: (ids, archived) =>
+        set((s) => {
+          const ts = nowIso();
+          const notifications = { ...s.notifications };
+          for (const id of ids) {
+            const n = notifications[id];
+            if (!n || n.recipientId !== s.meId) continue;
+            const next = { ...n, readAt: n.readAt ?? ts };
+            if (archived) next.archivedAt = ts;
+            else delete next.archivedAt;
+            notifications[id] = next;
+          }
+          return { notifications };
+        }),
 
       pushTrash: (kind, title, icon, snapshot) => {
         const id = uid('tr');
@@ -727,6 +957,7 @@ export const useData = create<Store>()(
           docs: { ...s.docs, ...(snap.docs ?? {}) },
           files: { ...s.files, ...(snap.files ?? {}) },
           maps: { ...s.maps, ...(snap.maps ?? {}) },
+          sprints: { ...s.sprints, ...(snap.sprints ?? {}) },
           comments: { ...s.comments, ...(snap.comments ?? {}) },
         })),
     }),
@@ -762,6 +993,10 @@ export const useData = create<Store>()(
           data.files = files;
           data.trash = (data.trash ?? []).filter((e) => (e.kind as string) !== 'meeting');
           data.prefs = data.prefs && { ...data.prefs, favorites: data.prefs.favorites.filter((f) => (f.kind as string) !== 'meeting') };
+        }
+        if (version < 4) {
+          data.sprints ??= {};
+          data.notifications ??= {};
         }
         return data as DataState;
       },
@@ -809,6 +1044,8 @@ const guardedActions = Object.fromEntries(
           'setPlaneConfig',
           'setPlaneSnapshot',
           'pruneTrash',
+          'markNotifications',
+          'archiveNotifications',
         ].includes(key),
     )
     .map(([key, action]) => [

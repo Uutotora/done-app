@@ -41,6 +41,18 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
 
   await page.getByRole('main').getByRole('link', { name: 'Доска', exact: true }).click();
   await expect(page.getByText('Регистрация по номеру телефона').first()).toBeVisible();
+  // Sprints: the demo has one running sprint with a burndown and one being planned.
+  await page.getByRole('main').getByRole('link', { name: 'Спринты', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Спринт', exact: true })).toHaveValue(/Спринт 15/);
+  await expect(page.getByRole('img', { name: 'Burndown' })).toBeVisible();
+  await page.getByRole('button', { name: 'Планирование', exact: true }).click();
+  await expect(page.getByText('Бэклог проекта')).toBeVisible();
+  await page.getByRole('button', { name: 'Текущий спринт', exact: true }).click();
+  await page.getByRole('button', { name: 'Завершить спринт', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Завершить спринт', exact: true }).click();
+  await expect(page.getByText('Спринт завершен')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Начать спринт/ })).toBeVisible();
+
   await page.getByRole('main').getByRole('link', { name: 'Календарь', exact: true }).click();
   await expect(page.getByRole('main')).toContainText('Сегодня');
   await page.getByRole('main').getByRole('link', { name: 'Карта', exact: true }).click();
@@ -65,6 +77,16 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
   await expect(page.getByRole('link', { name: 'Заметки 1:1 с Дмитрием' })).toBeVisible();
 
   await page.keyboard.press('Escape');
+
+  // Inbox: mentions from teammates in the demo, archived with the keyboard.
+  await page
+    .getByRole('complementary')
+    .getByRole('link', { name: /Входящие/ })
+    .click();
+  await expect(page.getByText('Вас упомянули')).toBeVisible();
+  await page.keyboard.press('e');
+  await expect(page.getByText('Вас упомянули')).toHaveCount(0);
+
   await page.getByRole('link', { name: 'Мои задачи', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Мои задачи', exact: true })).toBeVisible();
   await expect(page.locator('[data-radix-popper-content-wrapper]')).toHaveCount(0);

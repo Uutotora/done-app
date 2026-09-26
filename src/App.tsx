@@ -12,6 +12,7 @@ import { Splash } from '@/components/Logo';
 import { AuthGate } from '@/components/AuthGate';
 import { Home } from '@/views/Home';
 import { MyWork } from '@/views/MyWork';
+import { InboxView } from '@/views/Inbox';
 import { ProjectLayout } from '@/views/project/ProjectLayout';
 import { Overview } from '@/views/project/Overview';
 import { RoadmapView } from '@/views/Roadmap';
@@ -89,6 +90,7 @@ export function App() {
               <Routes>
                 <Route element={<AppShell />}>
                   <Route index element={<Home />} />
+                  <Route path="inbox" element={<InboxView />} />
                   <Route path="my-work" element={<MyWork />} />
                   <Route path="calendar" element={<CalendarView />} />
                   <Route path="roadmap" element={<RoadmapView />} />

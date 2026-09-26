@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUp, MoreHorizontal, PenLine, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowUp, AtSign, MoreHorizontal, PenLine, Trash2 } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
 import { useData } from '@/lib/store';
 import { useLang, useT } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Avatar, AutoTextarea } from './ui/bits';
 import { EntriesMenu } from './ui/Overlay';
 import { IconButton } from './ui/Button';
+import { MentionText, MentionTextarea, mentionsInText } from './Mentions';
 
 /** Notion-style comment thread under the page properties. */
 export function Comments({ targetKind, targetId }: { targetKind: CommentTarget; targetId: ID }) {
@@ -69,11 +70,20 @@ function CommentView({ comment }: { comment: Comment }) {
                 if (draft.trim() && draft !== comment.text) update(comment.id, draft.trim());
                 setEditing(false);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  setDraft(comment.text);
+                  setEditing(false);
+                }
+              }}
               className="rounded-md bg-bg px-2 py-1 text-[14px] shadow-[0_0_0_2px_var(--accent-soft)]"
             />
           </div>
         ) : (
-          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed">{comment.text}</div>
+          <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed">
+            <MentionText text={comment.text} mentions={comment.mentions} />
+          </div>
         )}
       </div>
       {comment.authorId === meId && !editing && (
@@ -109,31 +119,53 @@ function Composer({ targetKind, targetId }: { targetKind: CommentTarget; targetI
   const me = useMe();
   const add = useData((s) => s.addComment);
   const [text, setText] = useState('');
+  const [mentions, setMentions] = useState<ID[]>([]);
   const [focused, setFocused] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
   const send = () => {
     const v = text.trim();
     if (!v) return;
-    add(targetKind, targetId, v);
+    add(targetKind, targetId, v, mentionsInText(v, mentions, useData.getState().people));
     setText('');
+    setMentions([]);
+  };
+  const insertAt = () => {
+    const el = ref.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? text.length;
+    const prefix = caret > 0 && !/\s/.test(text[caret - 1]) ? ' @' : '@';
+    const next = text.slice(0, caret) + prefix + text.slice(caret);
+    setText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret + prefix.length, caret + prefix.length);
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
   };
   return (
     <div className={cn('flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors', focused && 'bg-hover')}>
       <Avatar person={me} size={24} className="mt-1" />
-      <AutoTextarea
+      <MentionTextarea
+        ref={ref}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onValueChange={setText}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        onSubmit={send}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            send();
-          }
-        }}
         placeholder={t('comments.placeholder')}
-        className="min-h-8 flex-1 py-1.5 text-[14px] leading-relaxed placeholder:text-fg-4"
+        className="min-h-8 py-1.5 text-[14px] leading-relaxed placeholder:text-fg-4"
       />
+      <IconButton
+        size="sm"
+        label={t('comments.mentionHint')}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={insertAt}
+        className={cn('mt-1 transition-opacity', focused || text ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100')}
+      >
+        <AtSign size={14} />
+      </IconButton>
       <AnimatePresence>
         {text.trim() && (
           <motion.button

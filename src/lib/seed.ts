@@ -3,7 +3,7 @@ import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
 import { shiftISO, todayISO } from './dates';
 import { nowIso, uid } from './utils';
-import type { DataState, Doc, FileNode, ID, Item, Lang, Person, PlaneIssueLite, PlaneSnapshot, PlaneStateLite, Project } from './types';
+import type { AppNotification, DataState, Doc, FileNode, ID, Item, Lang, Person, PlaneIssueLite, PlaneSnapshot, PlaneStateLite, Project } from './types';
 
 export interface OnboardingInput {
   lang: Lang;
@@ -149,6 +149,7 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
       priority: 'none',
       tags: [],
       order: order++,
+      createdBy: data.meId,
       createdAt: ts,
       updatedAt: ts,
       ...p,
@@ -601,6 +602,34 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
   act(phone, igor, 'status', 60 * 24 * 6, 'planned', 'in_progress');
   act(doubleCharge, elena, 'created', 60 * 24 * 3);
   act(doubleCharge, igor, 'status', 60 * 5, 'in_progress', 'in_review');
+
+  // ---- Inbox: what teammates sent your way while you were away
+  const myName = data.people[data.meId].name;
+  const mentionText = L(
+    `@${myName}, посмотри состояния ошибки в макете. Если ок, отдаю в разработку.`,
+    `@${myName}, could you check the error states in the mockup? If it looks good I will hand it off.`,
+  );
+  const mentionId = uid('cm');
+  data.comments[mentionId] = { id: mentionId, targetKind: 'item', targetId: phone, authorId: anna, text: mentionText, mentions: [data.meId], createdAt: ago(22) };
+  const metrics = Object.values(data.items).find((i) => i.assigneeId === data.meId && i.type === 'task' && i.dueDate === d(0));
+  const notify = (n: Omit<AppNotification, 'id' | 'recipientId' | 'createdAt'> & { minutesAgo: number; read?: boolean }) => {
+    const id = uid('nt');
+    const { minutesAgo, read, ...rest } = n;
+    data.notifications[id] = { ...rest, id, recipientId: data.meId, createdAt: ago(minutesAgo), ...(read ? { readAt: ago(minutesAgo - 1) } : {}) };
+  };
+  notify({ kind: 'mention', actorId: anna, targetKind: 'item', targetId: phone, projectId: mobile, text: mentionText, minutesAgo: 22 });
+  if (metrics) notify({ kind: 'assigned', actorId: dima, targetKind: 'item', targetId: metrics.id, projectId: mobile, minutesAgo: 70 });
+  notify({
+    kind: 'comment',
+    actorId: igor,
+    targetKind: 'item',
+    targetId: doubleCharge,
+    projectId: mobile,
+    text: L('Нашел причину: ретрай без ключа идемпотентности. Фикс на ревью.', 'Found it: retry without an idempotency key. Fix is in review.'),
+    minutesAgo: 95,
+  });
+  notify({ kind: 'status', actorId: igor, targetKind: 'item', targetId: doubleCharge, projectId: mobile, text: 'in_review', minutesAgo: 300, read: true });
+  notify({ kind: 'status', actorId: anna, targetKind: 'item', targetId: tour, projectId: mobile, text: 'planned', minutesAgo: 60 * 26, read: true });
 
   // ---- Docs
   const doc = (p: Omit<Doc, 'id' | 'createdAt' | 'updatedAt' | 'order'>): ID => {

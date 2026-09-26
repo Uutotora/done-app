@@ -2,14 +2,21 @@ import { CloudCheck, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
 import { api, flushWorkspace, isAdmin, logout, refreshWorkspace, useAuth } from '@/lib/auth';
 import { useLang } from '@/lib/i18n';
-import { dataSnapshot } from '@/lib/store';
+import { dataSnapshot, useData } from '@/lib/store';
 import { downloadBlob } from '@/lib/utils';
 import { toast } from '@/lib/ui';
 import { useState } from 'react';
+import { usePresence } from '@/lib/presence';
+import { Avatar, AvatarStack } from './ui/bits';
+import { Tooltip } from './ui/Overlay';
 import { Button } from './ui/Button';
 export function AccountStatus() {
   const state = useAuth();
   const ru = useLang() === 'ru';
+  const me = useData((s) => s.people[s.meId]);
+  const people = useData((s) => s.people);
+  const live = usePresence((s) => s.live);
+  const peers = usePresence((s) => s.peers).filter((p) => p.id !== state.user?.id && people[p.id]);
   return (
     <div className="border-t border-line px-3 py-3 text-[12px]">
       {isAdmin(state.user) && (
@@ -19,6 +26,7 @@ export function AccountStatus() {
         </Link>
       )}
       <div className="flex items-center gap-2">
+        {state.user && <Avatar person={me} size={18} />}
         <span className="min-w-0 flex-1 truncate font-medium">{state.user?.name ?? (ru ? 'Локальное демо' : 'Local demo')}</span>
         <button
           aria-label={ru ? 'Выйти' : 'Sign out'}
@@ -31,7 +39,14 @@ export function AccountStatus() {
       <div className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-3">
         {state.mode === 'signedIn' ? (
           <>
-            {state.sync === 'saving' ? <Loader2 size={11} className="animate-spin" /> : <CloudCheck size={11} />}
+            {state.sync === 'saving' ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <span className="relative flex h-[11px] w-[11px] items-center justify-center">
+                <CloudCheck size={11} />
+                {live && <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--c-green-solid)] ring-1 ring-[var(--bg-sidebar)]" />}
+              </span>
+            )}
             {state.sync === 'saved'
               ? ru
                 ? 'Сохранено на сервере'
@@ -50,6 +65,16 @@ export function AccountStatus() {
           'Stored in this browser'
         )}
       </div>
+      {peers.length > 0 && (
+        <Tooltip content={peers.map((p) => p.name).join(', ')} side="top">
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-fg-3">
+            <AvatarStack people={peers.map((p) => people[p.id])} size={18} max={5} />
+            <span>
+              {ru ? 'В сети' : 'Online'} · {peers.length}
+            </span>
+          </div>
+        </Tooltip>
+      )}
     </div>
   );
 }

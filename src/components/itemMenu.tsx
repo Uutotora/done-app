@@ -56,13 +56,15 @@ export function itemMenuEntries(item: Item): MenuEntry[] {
           checked: !item.assigneeId,
           onSelect: () => s.updateItem(item.id, { assigneeId: undefined }),
         },
-        ...Object.values(s.people).map<MenuEntry>((p) => ({
-          key: p.id,
-          icon: <Avatar person={p} size={16} />,
-          label: p.name,
-          checked: item.assigneeId === p.id,
-          onSelect: () => useData.getState().updateItem(item.id, { assigneeId: p.id }),
-        })),
+        ...Object.values(s.people)
+          .filter((p) => (!p.removed && !p.access?.suspended) || item.assigneeId === p.id)
+          .map<MenuEntry>((p) => ({
+            key: p.id,
+            icon: <Avatar person={p} size={16} />,
+            label: p.name,
+            checked: item.assigneeId === p.id,
+            onSelect: () => useData.getState().updateItem(item.id, { assigneeId: p.id }),
+          })),
       ],
     },
     {

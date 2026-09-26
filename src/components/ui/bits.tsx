@@ -155,6 +155,7 @@ export function ProgressRing({ value, size = 16, color = 'green' }: { value: num
 export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}

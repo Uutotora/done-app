@@ -334,6 +334,7 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
 
       <Editor
         key={item.id}
+        projectId={item.projectId}
         initial={item.content}
         onChange={(blocks) => useData.getState().updateItem(item.id, { content: blocks })}
         placeholder={t('item.descriptionPlaceholder')}

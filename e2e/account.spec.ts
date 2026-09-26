@@ -43,12 +43,16 @@ test('welcome, registration draft, durable account, project and viewer access', 
 
   await page.getByRole('button', { name: 'Меню пространства' }).click();
   await page.getByRole('menuitem', { name: 'Люди и доступ' }).click();
+  await expect(page.getByRole('heading', { name: 'Люди', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Добавить участников', exact: true }).click();
+  await page.getByLabel('Почта', { exact: true }).fill('viewer@example.test');
+  await page.getByLabel('Почта', { exact: true }).press('Enter');
+  await page.getByRole('radio', { name: /Наблюдатель/ }).click();
   await page.getByRole('button', { name: 'Пригласить', exact: true }).click();
-  await page.getByLabel('Email', { exact: true }).fill('viewer@example.test');
-  await page.getByLabel('Роль', { exact: true }).selectOption('viewer');
-  await page.getByRole('button', { name: 'Создать приглашение' }).click();
-  const invitation = await page.getByLabel('Ссылка приглашения').inputValue();
+  const invitation = await page.getByLabel('Ссылка приглашения для viewer@example.test').inputValue();
   await page.getByRole('button', { name: 'Готово', exact: true }).click();
+  await page.getByRole('tab', { name: /Приглашения/ }).click();
+  await expect(page.getByText('viewer@example.test')).toBeVisible();
   await expect(page.locator('.anim-overlay')).toHaveCount(0);
   await expect(page.getByRole('status')).toHaveCount(0, { timeout: 10000 });
   await page.screenshot({ path: testInfo.outputPath('admin.png'), animations: 'disabled' });
@@ -59,13 +63,26 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await viewer.getByLabel('Имя', { exact: true }).fill('Наблюдатель QA');
   await viewer.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Viewer-2026');
   await viewer.getByRole('button', { name: 'Создать аккаунт', exact: true }).click();
-  await expect(viewer.getByText('Режим просмотра', { exact: false })).toBeVisible();
+  await viewer.getByRole('complementary').getByRole('link', { name: 'Запуск продукта' }).click();
+  await expect(viewer.getByText('Вы можете только просматривать этот проект.')).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Новый', exact: true })).toHaveCount(0);
   await viewer.getByRole('button', { name: 'Меню пространства' }).click();
   await expect(viewer.getByRole('menuitem', { name: 'Выйти' })).toBeVisible();
   await expect(viewer.getByRole('menuitem', { name: 'Люди и доступ' })).toHaveCount(0);
   await viewer.keyboard.press('Escape');
   await viewer.goto('/admin');
-  await expect(viewer.getByRole('heading', { name: 'Доступ только администраторам' })).toBeVisible();
+  await expect(viewer.getByText('Составом и доступом управляют администраторы.')).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Добавить участников' })).toHaveCount(0);
+  await expect(viewer.getByRole('row', { name: /Наблюдатель QA/ })).toContainText('Наблюдатель');
+
+  // The owner sees the new member and their level in the project.
+  await page.getByRole('tab', { name: /Участники/ }).click();
+  await expect(page.getByRole('row', { name: /Наблюдатель QA/ })).toContainText('Наблюдатель', { timeout: 10_000 });
+  await page.getByRole('complementary').getByRole('link', { name: 'Запуск продукта' }).last().click();
+  await page.getByRole('button', { name: 'Поделиться', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Наблюдатель QA');
+  await expect(page.getByRole('dialog')).toContainText('Может просматривать');
+  await page.keyboard.press('Escape');
   const denied = await viewer.request.put('/api/workspace', { headers: { 'x-done-client': 'web' }, data: { revision: 0, data: {} } });
   expect(denied.status()).toBe(403);
   await viewerContext.close();

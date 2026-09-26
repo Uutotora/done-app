@@ -131,7 +131,7 @@ describe('authentication and server-enforced permissions', () => {
     const self = await (await call('/api/auth/session')).json();
     expect((await call(`/api/admin/members/${self.user.id}`, 'PATCH', { role: 'viewer' })).status).toBe(403);
     const log = await (await call('/api/admin/audit')).json();
-    expect(log.events.some((e: { action: string }) => e.action === 'member.updated')).toBe(true);
+    expect(log.events.some((e: { action: string }) => e.action === 'member.suspended')).toBe(true);
   });
   it('ends the session on logout', async () => {
     expect((await call('/api/auth/logout', 'POST', {}, member)).status).toBe(200);

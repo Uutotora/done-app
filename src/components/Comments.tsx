@@ -5,6 +5,7 @@ import { useData } from '@/lib/store';
 import { useLang, useT } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
 import { useMe } from '@/lib/selectors';
+import { isAdmin, useAuth, useProjectLevel } from '@/lib/auth';
 import type { Comment, CommentTarget, ID } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Avatar, AutoTextarea } from './ui/bits';
@@ -22,6 +23,8 @@ export function Comments({ targetKind, targetId }: { targetKind: CommentTarget; 
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [allComments, targetKind, targetId],
   );
+  const projectId = useData((s) => (targetKind === 'item' ? s.items[targetId]?.projectId : s.docs[targetId]?.projectId));
+  const level = useProjectLevel(projectId);
   return (
     <div className="space-y-1">
       <AnimatePresence initial={false}>
@@ -29,7 +32,7 @@ export function Comments({ targetKind, targetId }: { targetKind: CommentTarget; 
           <CommentView key={c.id} comment={c} />
         ))}
       </AnimatePresence>
-      <Composer targetKind={targetKind} targetId={targetId} />
+      {level && level !== 'viewer' && <Composer targetKind={targetKind} targetId={targetId} />}
     </div>
   );
 }
@@ -41,6 +44,9 @@ function CommentView({ comment }: { comment: Comment }) {
   const meId = useData((s) => s.meId);
   const update = useData((s) => s.updateComment);
   const remove = useData((s) => s.deleteComment);
+  // Admins may remove anyone's comment; only the author edits it.
+  const moderator = useAuth((s) => s.mode === 'signedIn' && isAdmin(s.user));
+  const mine = comment.authorId === meId;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.text);
   return (
@@ -86,7 +92,7 @@ function CommentView({ comment }: { comment: Comment }) {
           </div>
         )}
       </div>
-      {comment.authorId === meId && !editing && (
+      {(mine || moderator) && !editing && (
         <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover/comment:opacity-100 has-[[data-state=open]]:opacity-100">
           <EntriesMenu
             align="end"
@@ -96,15 +102,19 @@ function CommentView({ comment }: { comment: Comment }) {
               </IconButton>
             }
             entries={[
-              {
-                key: 'edit',
-                icon: <PenLine size={15} />,
-                label: t('comments.edit'),
-                onSelect: () => {
-                  setDraft(comment.text);
-                  setEditing(true);
-                },
-              },
+              ...(!mine
+                ? []
+                : [
+                    {
+                      key: 'edit',
+                      icon: <PenLine size={15} />,
+                      label: t('comments.edit'),
+                      onSelect: () => {
+                        setDraft(comment.text);
+                        setEditing(true);
+                      },
+                    },
+                  ]),
               { key: 'del', icon: <Trash2 size={15} />, label: t('comments.delete'), danger: true, onSelect: () => remove(comment.id) },
             ]}
           />

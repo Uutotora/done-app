@@ -79,8 +79,15 @@ export function WorkspaceBar() {
   );
   const entries: MenuEntry[] = [
     { key: 'settings', icon: <Settings size={15} />, label: t('nav.settings'), onSelect: () => navigate('/settings') },
-    ...(isAdmin(state.user)
-      ? [{ key: 'people', icon: <ShieldCheck size={15} />, label: ru ? 'Люди и доступ' : 'People & access', onSelect: () => navigate('/admin') }]
+    ...(state.mode === 'local' || isAdmin(state.user)
+      ? [
+          {
+            key: 'people',
+            icon: <ShieldCheck size={15} />,
+            label: ru ? 'Люди и доступ' : 'People & access',
+            onSelect: () => navigate('/settings/people'),
+          },
+        ]
       : []),
     {
       key: 'theme',
@@ -134,7 +141,7 @@ export function WorkspaceBar() {
   );
 }
 export function SyncNotice() {
-  const { mode, sync, syncError, user } = useAuth();
+  const { mode, sync, syncError } = useAuth();
   const ru = useLang() === 'ru';
   if (mode !== 'signedIn') return null;
   if (sync === 'error')
@@ -175,11 +182,7 @@ export function SyncNotice() {
         </Button>
       </div>
     );
-  return user?.role === 'viewer' ? (
-    <div className="border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-fg-3">
-      {ru ? 'Режим просмотра · для изменений нужен доступ участника' : 'Read-only · member access is required to make changes'}
-    </div>
-  ) : null;
+  return null;
 }
 export function PasswordSettings() {
   const user = useAuth((s) => s.user);

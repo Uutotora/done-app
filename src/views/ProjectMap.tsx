@@ -426,7 +426,9 @@ function PersonNode({ id, data, selected }: NodeProps<Node<NodeData, 'person'>>)
         }
       >
         <OptionList
-          options={Object.values(people).map((p) => ({ value: p.id, label: p.name, hint: p.role, icon: <Avatar person={p} size={16} /> }))}
+          options={Object.values(people)
+            .filter((p) => !p.removed)
+            .map((p) => ({ value: p.id, label: p.name, hint: p.role, icon: <Avatar person={p} size={16} /> }))}
           selected={data.personId}
           onSelect={(v) => {
             edit(id, { personId: v, text: data.text || `${people[v]?.name}${people[v]?.role ? `, ${people[v].role}` : ''}` });

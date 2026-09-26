@@ -141,6 +141,7 @@ function DocView({ doc }: { doc: Doc }) {
         <div className="mt-5">
           <Editor
             key={doc.id}
+            projectId={doc.projectId}
             initial={doc.content}
             onChange={(blocks) => useData.getState().updateDoc(doc.id, { content: blocks })}
             placeholder={t('docs.bodyPlaceholder')}

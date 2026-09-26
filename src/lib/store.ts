@@ -356,6 +356,7 @@ export const useData = create<Store>()(
           color: 'blue',
           status: 'on_track',
           leadId: s.meId,
+          createdBy: s.meId,
           order: maxOrder(Object.values(s.projects).filter((p) => p.groupId === patch.groupId)) + 1,
           createdAt: ts,
           updatedAt: ts,

@@ -18,14 +18,31 @@ export interface Cover {
   value: string;
 }
 
+export type WorkspaceRole = 'owner' | 'admin' | 'editor' | 'viewer';
+export type ProjectAccessLevel = 'viewer' | 'commenter' | 'editor';
+
+/** Access of a person in the local demo, where there are no accounts. Accounts keep this on the server. */
+export interface LocalAccess {
+  role: WorkspaceRole;
+  projectIds: ID[] | null;
+  projectRoles?: Record<ID, ProjectAccessLevel>;
+  canCreateProjects?: boolean;
+  suspended?: boolean;
+}
+
 export interface Person {
   id: ID;
   name: string;
+  /** Job title shown under the name, e.g. "Design lead". */
   role?: string;
   color: ColorName;
   email?: string;
   /** Optional emoji avatar instead of initials. */
   avatar?: string;
+  /** Left the workspace: kept so past work still shows who did it. */
+  removed?: boolean;
+  access?: LocalAccess;
+  invitedAt?: ISODateTime;
 }
 
 /** A space that groups projects in the sidebar (like Notion teamspaces). */
@@ -61,6 +78,8 @@ export interface Project {
   groupId?: ID;
   order: number;
   archived?: boolean;
+  /** Who created the project; creators may delete it without being admins. */
+  createdBy?: ID;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }

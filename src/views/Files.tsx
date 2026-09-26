@@ -275,7 +275,7 @@ export function FilesView() {
               onLink={() => openLinkDialog({ projectId, parentId: folderId })}
             />
           ) : settings.view === 'grid' ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
+            <div className={FILE_GRID}>
               <AnimatePresence initial={false}>
                 {visible.map((n) => (
                   <NodeCard
@@ -406,6 +406,9 @@ function Crumb({
   );
 }
 
+/** One column grid for project drives and files, so every card lines up like a Notion gallery. */
+const FILE_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3';
+
 function DrivesRow() {
   const t = useT();
   const projects = useProjectsList();
@@ -413,7 +416,7 @@ function DrivesRow() {
   return (
     <section className="mb-6">
       <div className="mb-2 text-[12.5px] font-medium text-fg-3">{t('files.projectDrives')}</div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+      <div className={FILE_GRID}>
         {projects.map((p) => (
           <DriveCard key={p.id} project={p} count={Object.values(files).filter((f) => f.projectId === p.id && f.kind !== 'folder').length} />
         ))}
@@ -430,7 +433,7 @@ function DriveCard({ project, count }: { project: Project; count: number }) {
       {...drop.bind}
       to={`/p/${project.id}/files`}
       className={cn(
-        'group flex items-center gap-3 rounded-xl border border-line px-3 py-2.5 transition-all hover:-translate-y-px hover:shadow-sm',
+        'group flex h-[60px] items-center gap-3 rounded-lg border border-line px-3 transition-colors duration-100 hover:bg-hover',
         drop.over && 'border-accent bg-accent-soft',
       )}
     >
@@ -444,7 +447,6 @@ function DriveCard({ project, count }: { project: Project; count: number }) {
         <span className="block truncate text-[14px] font-medium">{project.name || t('project.untitled')}</span>
         <span className="text-[12px] text-fg-3">{t('files.count', { n: count })}</span>
       </span>
-      <ChevronRight size={15} className="text-fg-4 opacity-0 transition-opacity group-hover:opacity-100" />
     </Link>
   );
 }
@@ -666,24 +668,10 @@ function Thumb({ node }: { node: FileNode }) {
   useEffect(() => {
     if (isImage) void getFileUrl(node.id).then(setUrl);
   }, [isImage, node.id]);
-  if (isImage && url)
-    return (
-      <img
-        src={url}
-        alt=""
-        draggable={false}
-        className="h-full w-full object-cover transition-transform duration-300 group-hover/card:scale-[1.03]"
-      />
-    );
-  if (node.kind === 'link' && linkService(node.url) === 'plaud')
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#f4f4f2] to-[#e9e9e6] dark:from-[#2a2a2a] dark:to-[#202020]">
-        <NodeIcon node={node} size={44} />
-      </div>
-    );
+  if (isImage && url) return <img src={url} alt="" draggable={false} className="h-full w-full object-cover" />;
   return (
     <div className="flex h-full w-full items-center justify-center bg-subtle">
-      <NodeIcon node={node} size={node.kind === 'folder' ? 56 : 40} />
+      <NodeIcon node={node} size={node.kind === 'folder' ? 52 : 36} />
     </div>
   );
 }
@@ -696,13 +684,7 @@ function NodeCard(props: NodeViewProps) {
   const drag = useDragSource(node, selection);
   const entries = useNodeMenu(node, onRename, onOpen, selection);
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ type: 'spring', stiffness: 500, damping: 38 }}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }}>
       <ContextMenu entries={entries}>
         <div
           {...drag.bind}
@@ -713,13 +695,13 @@ function NodeCard(props: NodeViewProps) {
           }}
           title={node.note}
           className={cn(
-            'group/card relative cursor-pointer select-none overflow-hidden rounded-xl border bg-elevated transition-[box-shadow,opacity] duration-150 hover:shadow-md',
+            'group/card relative cursor-pointer select-none overflow-hidden rounded-lg border bg-elevated transition-colors duration-100',
             selected ? 'border-accent ring-2 ring-accent/30' : 'border-line',
             drop.over && 'border-accent bg-accent-soft ring-2 ring-accent/40',
             drag.dragging && 'opacity-40',
           )}
         >
-          <div className="relative h-[112px] overflow-hidden border-b border-line">
+          <div className="relative h-[120px] overflow-hidden border-b border-line">
             <Thumb node={node} />
             <button
               onClick={(e) => {
@@ -752,15 +734,16 @@ function NodeCard(props: NodeViewProps) {
               />
             </div>
           </div>
-          <div className="flex items-start gap-2 px-3 py-2.5">
-            <span className="mt-[1px]">
-              <NodeIcon node={node} size={16} />
-            </span>
+          {/* Fixed height footer: names stay on one line so every card is the same size. */}
+          <div className="flex h-[56px] items-center gap-2 px-3 transition-colors duration-100 group-hover/card:bg-hover">
+            <NodeIcon node={node} size={16} />
             <div className="min-w-0 flex-1">
               {renaming ? (
                 <RenameInput node={node} onDone={onRenamed} className="h-6 text-[13.5px]" />
               ) : (
-                <div className="line-clamp-2 break-words text-[13.5px] font-medium leading-snug">{node.name}</div>
+                <div className="truncate text-[13.5px] font-medium leading-snug" title={node.name}>
+                  {node.name}
+                </div>
               )}
               <div className="mt-0.5 truncate text-[12px] text-fg-3">
                 {showPath && node.parentId

@@ -796,6 +796,7 @@ const ru = {
   'shortcuts.goHome': 'Перейти на главную',
   'shortcuts.inboxActions': 'Во входящих: в архив, непрочитано',
   'home.activeSprints': 'Активные спринты',
+  'docs.noSubpages': 'Внутри нет страниц',
 };
 
 export type TKey = keyof typeof ru;
@@ -1557,6 +1558,7 @@ const en: Dict = {
   'shortcuts.goHome': 'Go home',
   'shortcuts.inboxActions': 'Inbox: archive, unread',
   'home.activeSprints': 'Active sprints',
+  'docs.noSubpages': 'No pages inside',
 };
 
 const dicts: Record<Lang, Dict> = { ru, en };

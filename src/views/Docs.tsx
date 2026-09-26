@@ -100,7 +100,7 @@ export function DocsView() {
                   <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
                     <Link
                       to={`/docs/${d.id}`}
-                      className="group block overflow-hidden rounded-xl border border-line bg-elevated transition-all hover:-translate-y-0.5 hover:shadow-md"
+                      className="group block overflow-hidden rounded-xl border border-line bg-elevated transition-colors duration-100 hover:bg-subtle"
                     >
                       <div className="relative h-[120px] overflow-hidden border-b border-line bg-subtle px-4 pt-4">
                         <div className="relative line-clamp-5 text-[11.5px] leading-[1.55] text-fg-3">{blocksToText(d.content, 400) || ' '}</div>

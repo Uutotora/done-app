@@ -1,5 +1,4 @@
-import { motion } from 'motion/react';
-import { useId, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface ViewTab<T extends string> {
@@ -25,7 +24,6 @@ export function ViewBar<T extends string>({
   children?: ReactNode;
   className?: string;
 }) {
-  const id = useId();
   return (
     <div
       className={cn(
@@ -50,13 +48,7 @@ export function ViewBar<T extends string>({
                   {tab.icon}
                   {tab.label}
                 </span>
-                {active && (
-                  <motion.span
-                    layoutId={`viewbar-${id}`}
-                    className="absolute inset-x-1 bottom-0 h-[2px] rounded-full bg-fg"
-                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
-                  />
-                )}
+                {active && <span className="absolute inset-x-1 bottom-0 h-[2px] rounded-full bg-fg" />}
               </button>
             );
           })}

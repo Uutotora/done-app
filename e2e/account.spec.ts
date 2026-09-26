@@ -41,7 +41,8 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await page.getByRole('button', { name: 'Вся команда', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Проверить сохранение', exact: true })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Люди и доступ', exact: true }).click();
+  await page.getByRole('button', { name: 'Меню пространства' }).click();
+  await page.getByRole('menuitem', { name: 'Люди и доступ' }).click();
   await page.getByRole('button', { name: 'Пригласить', exact: true }).click();
   await page.getByLabel('Email', { exact: true }).fill('viewer@example.test');
   await page.getByLabel('Роль', { exact: true }).selectOption('viewer');
@@ -59,14 +60,18 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await viewer.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Viewer-2026');
   await viewer.getByRole('button', { name: 'Создать аккаунт', exact: true }).click();
   await expect(viewer.getByText('Режим просмотра', { exact: false })).toBeVisible();
-  await expect(viewer.getByRole('link', { name: 'Люди и доступ', exact: true })).toHaveCount(0);
+  await viewer.getByRole('button', { name: 'Меню пространства' }).click();
+  await expect(viewer.getByRole('menuitem', { name: 'Выйти' })).toBeVisible();
+  await expect(viewer.getByRole('menuitem', { name: 'Люди и доступ' })).toHaveCount(0);
+  await viewer.keyboard.press('Escape');
   await viewer.goto('/admin');
   await expect(viewer.getByRole('heading', { name: 'Доступ только администраторам' })).toBeVisible();
   const denied = await viewer.request.put('/api/workspace', { headers: { 'x-done-client': 'web' }, data: { revision: 0, data: {} } });
   expect(denied.status()).toBe(403);
   await viewerContext.close();
 
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.getByRole('button', { name: 'Меню пространства' }).click();
+  await page.getByRole('menuitem', { name: 'Выйти' }).click();
   await page.getByRole('button', { name: 'Уже есть аккаунт? Войти', exact: true }).click();
   await page.getByLabel('Email', { exact: true }).fill('owner@example.test');
   await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');

@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router';
 import { MoreHorizontal, Plus, Trash2, Link2 } from 'lucide-react';
@@ -127,13 +126,7 @@ export function TabsBar({ projectId, active, className, t }: { projectId: string
           >
             <tab.icon size={15} />
             {t(tab.label)}
-            {isActive && (
-              <motion.span
-                layoutId={`tab-underline-${projectId}`}
-                className="absolute inset-x-1.5 bottom-0 h-[2px] rounded-full bg-fg"
-                transition={{ type: 'spring', stiffness: 500, damping: 40 }}
-              />
-            )}
+            {isActive && <span className="absolute inset-x-1.5 bottom-0 h-[2px] rounded-full bg-fg" />}
           </NavLink>
         );
       })}

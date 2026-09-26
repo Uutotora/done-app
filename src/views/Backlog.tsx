@@ -46,7 +46,16 @@ import { ViewBar, NewButton } from '@/components/ViewBar';
 import { FilterButton, FilterPills, GroupButton, PropertiesButton, SearchToggle, SortButton } from '@/components/QueryControls';
 import { Avatar, Chip, EmptyState } from '@/components/ui/bits';
 import { ContextMenu, Tooltip } from '@/components/ui/Overlay';
-import { HorizonPicker, PersonPicker, PriorityPicker, SprintPicker, StatusPicker, TagChip, TagPicker, TypePicker } from '@/components/pickers/Pickers';
+import {
+  HorizonPicker,
+  PersonPicker,
+  PriorityPicker,
+  SprintPicker,
+  StatusPicker,
+  TagChip,
+  TagPicker,
+  TypePicker,
+} from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
 import { RicePicker } from '@/components/pickers/RicePicker';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';

@@ -32,7 +32,13 @@ export function useHoverGlide<T extends HTMLElement>() {
     current.current = row;
     setState((prev) => {
       // Rows can shift under a still pointer (sections expanding); only update when something changed.
-      if (!moved && prev.visible && Math.abs(prev.y - next.y) < 0.5 && Math.abs(prev.height - next.height) < 0.5 && Math.abs(prev.width - next.width) < 0.5)
+      if (
+        !moved &&
+        prev.visible &&
+        Math.abs(prev.y - next.y) < 0.5 &&
+        Math.abs(prev.height - next.height) < 0.5 &&
+        Math.abs(prev.width - next.width) < 0.5
+      )
         return prev;
       return { ...next, visible: true, instant: !prev.visible };
     });

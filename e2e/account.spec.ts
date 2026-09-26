@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 
+// The second test signs in as the owner created by the first one.
+test.describe.configure({ mode: 'serial' });
+
 test('welcome, registration draft, durable account, project and viewer access', async ({ page, browser }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -72,4 +75,62 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await page.getByRole('button', { name: 'Вся команда', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Проверить сохранение', exact: true })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('teammates see mentions live in their inbox and each other on the page', async ({ browser }) => {
+  const headers = { 'x-done-client': 'web' };
+  const ownerContext = await browser.newContext({ locale: 'ru-RU' });
+  const owner = await ownerContext.newPage();
+  expect(
+    (
+      await owner.request.post('/api/auth/login', { headers, data: { email: 'owner@example.test', password: 'Disposable-QA-Password-2026' } })
+    ).status(),
+  ).toBe(200);
+  const invite = await (
+    await owner.request.post('/api/admin/invites', { headers, data: { email: 'member@example.test', role: 'member', projectIds: null } })
+  ).json();
+  const memberContext = await browser.newContext({ locale: 'ru-RU' });
+  const member = await memberContext.newPage();
+  const errors: string[] = [];
+  member.on('pageerror', (e) => errors.push(e.message));
+  owner.on('pageerror', (e) => errors.push(e.message));
+  expect(
+    (
+      await member.request.post('/api/auth/register', {
+        headers,
+        data: { name: 'Мира', email: 'member@example.test', password: 'Disposable-QA-Member-2026', invite: invite.token },
+      })
+    ).status(),
+  ).toBe(200);
+
+  await member.goto('/');
+  await owner.goto('/my-work?scope=team');
+  await owner.getByRole('button', { name: 'Проверить сохранение', exact: true }).click();
+  const composer = owner.getByPlaceholder('Добавить комментарий...');
+  await composer.click();
+  await composer.pressSequentially('@Ми');
+  await owner.getByRole('option', { name: /Мира/ }).click();
+  await composer.pressSequentially('проверь, пожалуйста');
+  const saved = owner.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
+  await composer.press('Enter');
+  await saved;
+  await expect(owner.getByText('@Мира').first()).toBeVisible();
+
+  // No reload: the change arrives over the live event stream.
+  const inbox = member.getByRole('complementary').getByRole('link', { name: /Входящие/ });
+  await expect(inbox).toContainText('1', { timeout: 10_000 });
+  await inbox.click();
+  await expect(member.getByText('Вас упомянули')).toBeVisible();
+  await expect(member.getByRole('main').getByText('Проверить сохранение')).toBeVisible();
+
+  // Presence: both open the same project and see each other in the top bar.
+  const projectId = await owner.evaluate(
+    () => Object.keys((window as unknown as { __done: { getState: () => { projects: object } } }).__done.getState().projects)[0],
+  );
+  await member.goto(`/p/${projectId}/overview`);
+  await owner.goto(`/p/${projectId}/overview`);
+  await expect(owner.locator('header').getByTitle('Мира')).toBeVisible({ timeout: 10_000 });
+  expect(errors).toEqual([]);
+  await memberContext.close();
+  await ownerContext.close();
 });

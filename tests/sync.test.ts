@@ -37,7 +37,12 @@ const item = (id: string, projectId: string, extra: Record<string, unknown> = {}
 
 async function join(name: string, role: string, projectIds: string[] | null) {
   const invite = await (await call('/api/admin/invites', 'POST', { email: `${name}@example.com`, role, projectIds })).json();
-  const response = await call('/api/auth/register', 'POST', { name, email: `${name}@example.com`, password: `a-long-${name}-password`, invite: invite.token }, '');
+  const response = await call(
+    '/api/auth/register',
+    'POST',
+    { name, email: `${name}@example.com`, password: `a-long-${name}-password`, invite: invite.token },
+    '',
+  );
   cookies[name] = response.headers.get('set-cookie')!.split(';')[0];
   ids[name] = (await response.json()).user.id;
 }
@@ -52,7 +57,12 @@ beforeAll(async () => {
     ['alpha', 'secret'].map((id) => [id, { id, name: id, icon: '📁', color: 'blue', status: 'on_track', order: 1, createdAt: ts, updatedAt: ts }]),
   ) as typeof data.projects;
   data.items = { shared: item('shared', 'alpha'), hidden: item('hidden', 'secret') } as unknown as typeof data.items;
-  const response = await call('/api/auth/register', 'POST', { name: 'Owner', email: 'owner@example.com', password: 'a-long-owner-password', data }, '');
+  const response = await call(
+    '/api/auth/register',
+    'POST',
+    { name: 'Owner', email: 'owner@example.com', password: 'a-long-owner-password', data },
+    '',
+  );
   cookies.owner = response.headers.get('set-cookie')!.split(';')[0];
   ids.owner = (await response.json()).user.id;
   await join('mia', 'member', ['alpha']);
@@ -127,7 +137,16 @@ describe('team sync on the server', () => {
   });
 
   it('delivers notifications only to their recipient', async () => {
-    const note = { id: 'n1', recipientId: ids.vic, actorId: ids.mia, kind: 'assigned', targetKind: 'item', targetId: 'shared', projectId: 'alpha', createdAt: ts };
+    const note = {
+      id: 'n1',
+      recipientId: ids.vic,
+      actorId: ids.mia,
+      kind: 'assigned',
+      targetKind: 'item',
+      targetId: 'shared',
+      projectId: 'alpha',
+      createdAt: ts,
+    };
     expect((await patch('mia', { records: { notifications: { n1: { before: null, after: { ...note, actorId: ids.owner } } } } })).status).toBe(403);
     expect((await patch('mia', { records: { notifications: { n1: { before: null, after: note } } } })).status).toBe(200);
     expect((await load('mia')).data.notifications.n1).toBeUndefined();
@@ -137,7 +156,9 @@ describe('team sync on the server', () => {
     expect((await patch('vic', { records: { notifications: { n1: { before: inbox.n1, after: { ...inbox.n1, readAt: ts } } } } })).status).toBe(200);
     const task = (await load('vic')).data.items.shared;
     expect((await patch('vic', { records: { items: { shared: { before: task, after: { ...task, title: 'Viewer' } } } } })).status).toBe(403);
-    expect((await patch('leo', { records: { notifications: { n1: { before: inbox.n1, after: { ...inbox.n1, archivedAt: ts } } } } })).status).toBe(403);
+    expect((await patch('leo', { records: { notifications: { n1: { before: inbox.n1, after: { ...inbox.n1, archivedAt: ts } } } } })).status).toBe(
+      403,
+    );
     expect((await load('vic')).data.notifications.n1.readAt).toBe(ts);
   });
 

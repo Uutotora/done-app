@@ -101,7 +101,8 @@ export function applyChanges(current, changes, user) {
   if (user.role === 'viewer') {
     // Viewers only keep their own inbox: read and archive notifications addressed to them.
     if (Object.keys(changes.records ?? {}).some((key) => key !== 'notifications') || changes.workspace) throw error(403, 'Read-only access');
-    for (const change of Object.values(changes.records?.notifications ?? {})) if (!change?.before || !change?.after) throw error(403, 'Read-only access');
+    for (const change of Object.values(changes.records?.notifications ?? {}))
+      if (!change?.before || !change?.after) throw error(403, 'Read-only access');
     changes = { records: changes.records ?? {} };
   }
   normalizeState(current);
@@ -181,10 +182,10 @@ export function applyChanges(current, changes, user) {
     if (!Array.isArray(add) || !Array.isArray(remove)) throw error(400, 'Invalid changes');
     const drop = new Set(remove);
     const known = new Set(next.trash.map((e) => e.id));
-    next.trash = [...add.filter((e) => record(e) && typeof e.id === 'string' && !known.has(e.id)), ...next.trash.filter((e) => !drop.has(e.id))].slice(
-      0,
-      200,
-    );
+    next.trash = [
+      ...add.filter((e) => record(e) && typeof e.id === 'string' && !known.has(e.id)),
+      ...next.trash.filter((e) => !drop.has(e.id)),
+    ].slice(0, 200);
   }
   pruneOrphans(next);
   validateState(next);

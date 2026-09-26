@@ -817,7 +817,8 @@ export const useData = create<Store>()(
           nextId = Object.values(s.sprints)
             .filter((sp) => sp.projectId === sprint.projectId && sp.status === 'planned')
             .sort((a, b) => a.startDate.localeCompare(b.startDate))[0]?.id;
-          if (!nextId) nextId = get().createSprint(sprint.projectId, { startDate: addDays(sprint.endDate > todayIso() ? todayIso() : sprint.endDate, 1) });
+          if (!nextId)
+            nextId = get().createSprint(sprint.projectId, { startDate: addDays(sprint.endDate > todayIso() ? todayIso() : sprint.endDate, 1) });
         }
         set((st) => {
           const items = { ...st.items };
@@ -835,7 +836,13 @@ export const useData = create<Store>()(
       deleteSprint: (id) => {
         const s = get();
         const linked = Object.values(s.items).filter((i) => i.sprintId === id);
-        const snap: Snapshot = { sprints: pick(s.sprints, [id]), items: pick(s.items, linked.map((i) => i.id)) };
+        const snap: Snapshot = {
+          sprints: pick(s.sprints, [id]),
+          items: pick(
+            s.items,
+            linked.map((i) => i.id),
+          ),
+        };
         const items = { ...s.items };
         for (const it of linked) items[it.id] = { ...it, sprintId: undefined };
         set({ sprints: omit(s.sprints, [id]), items });

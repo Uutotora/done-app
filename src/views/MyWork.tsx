@@ -116,7 +116,13 @@ export function MyWork() {
               </button>
             }
             entries={[
-              { key: 'all', icon: <FolderOpen size={15} />, label: t('work.allProjects'), checked: !projectId, onSelect: () => change({ project: '' }) },
+              {
+                key: 'all',
+                icon: <FolderOpen size={15} />,
+                label: t('work.allProjects'),
+                checked: !projectId,
+                onSelect: () => change({ project: '' }),
+              },
               { key: 's', separator: true },
               ...projectList.map((p) => ({
                 key: p.id,

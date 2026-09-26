@@ -34,7 +34,17 @@ const fmt = (v: number) => (Math.round(v * 10) / 10).toLocaleString();
  * Sprint burndown: remaining work per day against the ideal pace.
  * Hover snaps a crosshair to the nearest day; a hidden table carries the same numbers.
  */
-export function BurndownChart({ points, unit, scope, startDate }: { points: BurndownPoint[]; unit: 'points' | 'items'; scope: number; startDate: string }) {
+export function BurndownChart({
+  points,
+  unit,
+  scope,
+  startDate,
+}: {
+  points: BurndownPoint[];
+  unit: 'points' | 'items';
+  scope: number;
+  startDate: string;
+}) {
   const t = useT();
   const lang = useLang();
   const { ref, width } = useWidth<HTMLDivElement>();
@@ -200,7 +210,15 @@ export function VelocityChart({ data }: { data: { sprint: Sprint; done: number }
             {data.length > 1 && (
               <g>
                 <line x1={pad.left} x2={pad.left + w} y1={y(avg)} y2={y(avg)} stroke="var(--chart-reference)" strokeWidth="1" strokeDasharray="4 4" />
-                <text x={pad.left + w} y={y(avg) - 5} textAnchor="end" className="fill-fg-3 text-[11px]" stroke="var(--bg)" strokeWidth="3" paintOrder="stroke">
+                <text
+                  x={pad.left + w}
+                  y={y(avg) - 5}
+                  textAnchor="end"
+                  className="fill-fg-3 text-[11px]"
+                  stroke="var(--bg)"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                >
                   {t('sprint.avg', { n: Math.round(avg * 10) / 10 })}
                 </text>
               </g>
@@ -215,10 +233,27 @@ export function VelocityChart({ data }: { data: { sprint: Sprint; done: number }
                   ? `M${cx - barW / 2},${y(0)} V${top + r} Q${cx - barW / 2},${top} ${cx - barW / 2 + r},${top} H${cx + barW / 2 - r} Q${cx + barW / 2},${top} ${cx + barW / 2},${top + r} V${y(0)} Z`
                   : '';
               return (
-                <g key={d.sprint.id} onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)} tabIndex={0} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
+                <g
+                  key={d.sprint.id}
+                  onPointerEnter={() => setHover(i)}
+                  onPointerLeave={() => setHover(null)}
+                  tabIndex={0}
+                  onFocus={() => setHover(i)}
+                  onBlur={() => setHover(null)}
+                >
                   <rect x={cx - band / 2} y={pad.top} width={band} height={h + pad.bottom} fill="transparent" />
-                  {path && <path d={path} fill="var(--chart-series)" opacity={hover === null || hover === i ? 1 : 0.55} className="transition-opacity" />}
-                  <text x={cx} y={top - 6} textAnchor="middle" className="fill-fg-2 text-[11px] font-medium" stroke="var(--bg)" strokeWidth="3" paintOrder="stroke">
+                  {path && (
+                    <path d={path} fill="var(--chart-series)" opacity={hover === null || hover === i ? 1 : 0.55} className="transition-opacity" />
+                  )}
+                  <text
+                    x={cx}
+                    y={top - 6}
+                    textAnchor="middle"
+                    className="fill-fg-2 text-[11px] font-medium"
+                    stroke="var(--bg)"
+                    strokeWidth="3"
+                    paintOrder="stroke"
+                  >
                     {d.done}
                   </text>
                   <text x={cx} y={H - 8} textAnchor="middle" className="fill-fg-3 text-[11px]">
@@ -235,9 +270,7 @@ export function VelocityChart({ data }: { data: { sprint: Sprint; done: number }
             style={{ left: Math.min(Math.max(0, pad.left + band * hover + band / 2 + 14), Math.max(0, width - 170)) }}
           >
             <div className="font-medium text-fg">{data[hover].sprint.name}</div>
-            <div className="text-fg-3">
-              {formatRange(data[hover].sprint.startDate, data[hover].sprint.endDate, lang)}
-            </div>
+            <div className="text-fg-3">{formatRange(data[hover].sprint.startDate, data[hover].sprint.endDate, lang)}</div>
             <div className="mt-1">
               <span className="font-semibold tabular-nums text-fg">{data[hover].done}</span>{' '}
               <span className="text-fg-3">{t('sprint.unit.items')}</span>

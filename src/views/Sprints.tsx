@@ -56,7 +56,9 @@ export function SprintsView() {
           <Plus size={15} /> {t('sprint.new')}
         </NewButton>
       </ViewBar>
-      {tab.v === 'current' && <CurrentSprint projectId={projectId!} sprints={sprints} onPlan={() => setTab({ v: 'planning' })} onCreate={newSprint} />}
+      {tab.v === 'current' && (
+        <CurrentSprint projectId={projectId!} sprints={sprints} onPlan={() => setTab({ v: 'planning' })} onCreate={newSprint} />
+      )}
       {tab.v === 'planning' && <Planning projectId={projectId!} sprints={sprints} onCreate={newSprint} />}
       {tab.v === 'history' && <History sprints={sprints} />}
     </div>
@@ -195,11 +197,7 @@ function SprintHeader({ sprint, compact }: { sprint: Sprint; compact?: boolean }
             </span>
           </Tooltip>
         )}
-        {sprint.status === 'active' && !compact && (
-          <Button onClick={() => setCompleting(true)}>
-            {t('sprint.complete')}
-          </Button>
-        )}
+        {sprint.status === 'active' && !compact && <Button onClick={() => setCompleting(true)}>{t('sprint.complete')}</Button>}
         {sprint.status !== 'active' && (
           <EntriesMenu
             align="end"
@@ -342,7 +340,12 @@ function CompleteDialog({ sprint, open, onOpenChange }: { sprint: Sprint; open: 
                   carry === v ? 'border-accent bg-accent-soft' : 'border-line hover:bg-hover',
                 )}
               >
-                <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border-[1.5px]', carry === v ? 'border-accent' : 'border-fg-4')}>
+                <span
+                  className={cn(
+                    'flex h-4 w-4 items-center justify-center rounded-full border-[1.5px]',
+                    carry === v ? 'border-accent' : 'border-fg-4',
+                  )}
+                >
                   {carry === v && <span className="h-2 w-2 rounded-full bg-accent" />}
                 </span>
                 {t(v === 'next' ? 'sprint.carryNext' : 'sprint.carryBacklog')}
@@ -383,19 +386,18 @@ function Planning({ projectId, sprints, onCreate }: { projectId: ID; sprints: Sp
   const backlog = useMemo(() => {
     const openIds = new Set(openKey.split(','));
     return Object.values(allItems)
-        .filter(
-          (i) =>
-            i.projectId === projectId &&
-            i.type !== 'initiative' &&
-            i.type !== 'milestone' &&
-            i.status !== 'done' &&
-            i.status !== 'canceled' &&
-            (!i.sprintId || !openIds.has(i.sprintId)),
-        )
-        .sort(
-          (a, b) =>
-            PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || (riceScore(b.rice) ?? -1) - (riceScore(a.rice) ?? -1) || a.order - b.order,
-        );
+      .filter(
+        (i) =>
+          i.projectId === projectId &&
+          i.type !== 'initiative' &&
+          i.type !== 'milestone' &&
+          i.status !== 'done' &&
+          i.status !== 'canceled' &&
+          (!i.sprintId || !openIds.has(i.sprintId)),
+      )
+      .sort(
+        (a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || (riceScore(b.rice) ?? -1) - (riceScore(a.rice) ?? -1) || a.order - b.order,
+      );
   }, [allItems, projectId, openKey]);
   const avg = averageVelocity(sprints);
 
@@ -447,7 +449,10 @@ function SprintBucket({ sprint, sprints, velocity: avg }: { sprint: Sprint; spri
   const t = useT();
   const allItems = useData((s) => s.items);
   const items = useMemo(
-    () => sprintItems(sprint.id, allItems).sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]),
+    () =>
+      sprintItems(sprint.id, allItems).sort(
+        (a, b) => Number(a.status === 'done') - Number(b.status === 'done') || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority],
+      ),
     [sprint.id, allItems],
   );
   const over = avg !== undefined && sprint.status === 'planned' && items.length > avg;

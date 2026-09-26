@@ -39,9 +39,7 @@ export function InboxView() {
     all: mine.filter((n) => !n.archivedAt).length,
     archived: mine.filter((n) => n.archivedAt).length,
   };
-  const list = mine.filter((n) =>
-    tab === 'archived' ? n.archivedAt : !n.archivedAt && (tab === 'all' || !n.readAt || keep.has(n.id)),
-  );
+  const list = mine.filter((n) => (tab === 'archived' ? n.archivedAt : !n.archivedAt && (tab === 'all' || !n.readAt || keep.has(n.id))));
   const groups = useMemo(() => {
     const out: { key: 'today' | 'yesterday' | 'earlier'; items: AppNotification[] }[] = [];
     for (const n of list) {
@@ -118,12 +116,19 @@ export function InboxView() {
                 role="tab"
                 aria-selected={tab === key}
                 onClick={() => setTab(key)}
-                className={cn('relative flex items-center gap-1.5 py-2.5 text-[13px]', tab === key ? 'font-medium text-fg' : 'text-fg-3 hover:text-fg')}
+                className={cn(
+                  'relative flex items-center gap-1.5 py-2.5 text-[13px]',
+                  tab === key ? 'font-medium text-fg' : 'text-fg-3 hover:text-fg',
+                )}
               >
                 {t(`inbox.${key}`)}
                 {counts[key] > 0 && <span className="text-[11px] tabular-nums text-fg-4">{counts[key]}</span>}
                 {tab === key && (
-                  <motion.span layoutId="inbox-tab" className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-fg" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />
+                  <motion.span
+                    layoutId="inbox-tab"
+                    className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-fg"
+                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                  />
                 )}
               </button>
             ))}
@@ -241,7 +246,9 @@ function InboxRow({
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[13.5px]">
           {target.itemType ? <TypeIcon type={target.itemType} size={14} /> : target.icon ? <PageIcon icon={target.icon} size={15} /> : null}
-          <span className={cn('truncate', target.exists ? 'text-fg underline decoration-line-strong underline-offset-[3px]' : 'text-fg-3 line-through')}>
+          <span
+            className={cn('truncate', target.exists ? 'text-fg underline decoration-line-strong underline-offset-[3px]' : 'text-fg-3 line-through')}
+          >
             {target.title}
           </span>
           {project && n.targetKind !== 'project' && (

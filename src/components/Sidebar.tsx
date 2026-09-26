@@ -407,7 +407,9 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
           className="relative mt-1 flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] text-fg-3 transition-colors hover:text-fg-2"
         >
           <span className={cn('relative flex h-1.5 w-1.5 rounded-full', planeConfigured ? 'bg-[var(--c-green-solid)]' : 'bg-fg-4')}>
-            {planeConfigured && <span className="absolute inset-0 animate-ping rounded-full bg-[var(--c-green-solid)] opacity-40 [animation-duration:2.4s]" />}
+            {planeConfigured && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--c-green-solid)] opacity-40 [animation-duration:2.4s]" />
+            )}
           </span>
           {planeConfigured ? t('nav.planeConnected') : t('nav.planeNotConnected')}
         </NavLink>
@@ -1091,11 +1093,7 @@ function DocRow({ doc, depth, onAddChild }: { doc: Doc; depth: number; onAddChil
           }}
           // Radix Slot (context menu trigger) can't merge NavLink's function className, so compute it here.
           data-glide
-          className={cn(
-            rowClass(isActive),
-            hint?.pos === 'inside' && 'bg-accent-soft ring-1 ring-accent/50',
-            drag?.id === doc.id && 'opacity-40',
-          )}
+          className={cn(rowClass(isActive), hint?.pos === 'inside' && 'bg-accent-soft ring-1 ring-accent/50', drag?.id === doc.id && 'opacity-40')}
           style={{ paddingLeft: 8 + depth * 14 }}
         >
           {hint && hint.pos !== 'inside' && <DropLine pos={hint.pos} />}

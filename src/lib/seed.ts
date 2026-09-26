@@ -3,7 +3,21 @@ import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
 import { shiftISO, todayISO } from './dates';
 import { nowIso, uid } from './utils';
-import type { AppNotification, DataState, Doc, Sprint, FileNode, ID, Item, Lang, Person, PlaneIssueLite, PlaneSnapshot, PlaneStateLite, Project } from './types';
+import type {
+  AppNotification,
+  DataState,
+  Doc,
+  Sprint,
+  FileNode,
+  ID,
+  Item,
+  Lang,
+  Person,
+  PlaneIssueLite,
+  PlaneSnapshot,
+  PlaneStateLite,
+  Project,
+} from './types';
 
 export interface OnboardingInput {
   lang: Lang;
@@ -646,7 +660,15 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     `@${myName}, could you check the error states in the mockup? If it looks good I will hand it off.`,
   );
   const mentionId = uid('cm');
-  data.comments[mentionId] = { id: mentionId, targetKind: 'item', targetId: phone, authorId: anna, text: mentionText, mentions: [data.meId], createdAt: ago(22) };
+  data.comments[mentionId] = {
+    id: mentionId,
+    targetKind: 'item',
+    targetId: phone,
+    authorId: anna,
+    text: mentionText,
+    mentions: [data.meId],
+    createdAt: ago(22),
+  };
   const metrics = Object.values(data.items).find((i) => i.assigneeId === data.meId && i.type === 'task' && i.dueDate === d(0));
   const notify = (n: Omit<AppNotification, 'id' | 'recipientId' | 'createdAt'> & { minutesAgo: number; read?: boolean }) => {
     const id = uid('nt');
@@ -664,7 +686,16 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     text: L('Нашел причину: ретрай без ключа идемпотентности. Фикс на ревью.', 'Found it: retry without an idempotency key. Fix is in review.'),
     minutesAgo: 95,
   });
-  notify({ kind: 'status', actorId: igor, targetKind: 'item', targetId: doubleCharge, projectId: mobile, text: 'in_review', minutesAgo: 300, read: true });
+  notify({
+    kind: 'status',
+    actorId: igor,
+    targetKind: 'item',
+    targetId: doubleCharge,
+    projectId: mobile,
+    text: 'in_review',
+    minutesAgo: 300,
+    read: true,
+  });
   notify({ kind: 'status', actorId: anna, targetKind: 'item', targetId: tour, projectId: mobile, text: 'planned', minutesAgo: 60 * 26, read: true });
   notify({
     kind: 'sprint',

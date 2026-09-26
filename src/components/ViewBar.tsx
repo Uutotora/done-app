@@ -27,7 +27,12 @@ export function ViewBar<T extends string>({
 }) {
   const id = useId();
   return (
-    <div className={cn('full-width no-scrollbar flex h-11 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-line', className)}>
+    <div
+      className={cn(
+        'full-width no-scrollbar flex h-11 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-line',
+        className,
+      )}
+    >
       {tabs && (
         <div className="flex h-full shrink-0 items-stretch gap-0.5">
           {tabs.map((tab) => {

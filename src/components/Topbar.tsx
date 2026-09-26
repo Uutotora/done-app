@@ -46,8 +46,14 @@ export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb
             className="group/menu relative"
           >
             {/* Like Notion: the menu icon turns into "open" arrows under the pointer. */}
-            <Menu size={18} className="absolute transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:scale-75 group-hover/menu:opacity-0" />
-            <ChevronsRight size={18} className="absolute -translate-x-1 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:translate-x-0 group-hover/menu:opacity-100" />
+            <Menu
+              size={18}
+              className="absolute transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:scale-75 group-hover/menu:opacity-0"
+            />
+            <ChevronsRight
+              size={18}
+              className="absolute -translate-x-1 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:translate-x-0 group-hover/menu:opacity-100"
+            />
           </IconButton>
         </Tooltip>
       )}
@@ -79,7 +85,10 @@ export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb
               onClick={() => toggleFavorite(favorite)}
               label={isFav ? t('common.removeFromFavorites') : t('common.addToFavorites')}
             >
-              <Star size={17} className={cn('transition-[color,transform,translate,scale,rotate]', isFav && 'scale-110 fill-[#f5c518] text-[#f5c518]')} />
+              <Star
+                size={17}
+                className={cn('transition-[color,transform,translate,scale,rotate]', isFav && 'scale-110 fill-[#f5c518] text-[#f5c518]')}
+              />
             </IconButton>
           </Tooltip>
         )}

@@ -44,7 +44,9 @@ export function AccountStatus() {
             ) : (
               <span className="relative flex h-[11px] w-[11px] items-center justify-center">
                 <CloudCheck size={11} />
-                {live && <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--c-green-solid)] ring-1 ring-[var(--bg-sidebar)]" />}
+                {live && (
+                  <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--c-green-solid)] ring-1 ring-[var(--bg-sidebar)]" />
+                )}
               </span>
             )}
             {state.sync === 'saved'

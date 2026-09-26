@@ -59,9 +59,15 @@ describe('sprints', () => {
     s().createItem({ projectId: project, title: 'A', sprintId: sprint, estimate: 3, status: 'done' });
     s().createItem({ projectId: project, title: 'B', sprintId: sprint, estimate: 5 });
     const items = Object.values(s().items);
-    const stats = sprintStats(s().sprints[sprint], items.filter((i) => i.sprintId === sprint));
+    const stats = sprintStats(
+      s().sprints[sprint],
+      items.filter((i) => i.sprintId === sprint),
+    );
     expect(stats.points).toEqual({ total: 8, done: 3 });
-    const chart = burndown(s().sprints[sprint], items.filter((i) => i.sprintId === sprint));
+    const chart = burndown(
+      s().sprints[sprint],
+      items.filter((i) => i.sprintId === sprint),
+    );
     expect(chart.unit).toBe('points');
     expect(chart.points).toHaveLength(10);
     expect(chart.points.at(-1)!.ideal).toBe(0);

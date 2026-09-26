@@ -69,3 +69,10 @@ export function deleteNodesWithUndo(ids: ID[]) {
   const title = ids.length === 1 ? first.name : `${first.name} +${ids.length - 1}`;
   trashWithUndo('file', title, icon, s.deleteNodes(ids), 'files.deleted');
 }
+
+export function deleteSprintWithUndo(id: ID) {
+  const s = useData.getState();
+  const sprint = s.sprints[id];
+  if (!sprint) return;
+  trashWithUndo('sprint', sprint.name, undefined, s.deleteSprint(id), 'sprint.deleted');
+}

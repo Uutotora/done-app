@@ -1,4 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { IterationCw } from 'lucide-react';
+import { useProjectSprints } from '@/lib/sprints';
 import { Popover } from '@/components/ui/Overlay';
 import { Avatar, Chip, PageIcon } from '@/components/ui/bits';
 import { OptionList, type Option } from './OptionList';
@@ -235,5 +237,30 @@ export function TagPicker({ value, onChange, children, align }: PickerProps<stri
         createLabel={(q) => t('prop.createTag', { tag: q })}
       />
     </Popover>
+  );
+}
+
+/** Sprint of the item's project. Finished sprints are listed only when already selected. */
+export function SprintPicker({ projectId, value, onChange, children, align }: PickerProps<ID | undefined> & { projectId: ID }) {
+  const t = useT();
+  const sprints = useProjectSprints(projectId);
+  const options = useMemo<Option<ID | undefined>[]>(
+    () => [
+      ...sprints
+        .filter((sp) => sp.status !== 'completed' || sp.id === value)
+        .map((sp) => ({
+          value: sp.id as ID | undefined,
+          label: sp.name,
+          hint: t(`sprint.status.${sp.status}`),
+          icon: <IterationCw size={14} className={sp.status === 'active' ? 'text-accent' : 'text-fg-3'} />,
+        })),
+      { value: undefined, label: t('sprint.none'), icon: <IterationCw size={14} className="text-fg-4" /> },
+    ],
+    [sprints, value, t],
+  );
+  return (
+    <PickerShell options={options} value={value} onChange={onChange} align={align} placeholder={t('prop.sprint')}>
+      {children}
+    </PickerShell>
   );
 }

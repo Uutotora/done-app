@@ -13,6 +13,7 @@ import {
   GripVertical,
   Hash,
   Hourglass,
+  IterationCw,
   List,
   PanelRightOpen,
   Plus,
@@ -32,6 +33,7 @@ import { useLang, useT, type TKey } from '@/lib/i18n';
 import { useViewState } from '@/lib/viewState';
 import { useHotkey } from '@/lib/hooks';
 import { useItems } from '@/lib/selectors';
+import { useProjectSprints } from '@/lib/sprints';
 import { EMPTY_FILTER, filterItems, groupItems, sortItems, treeRows, type GroupField, type ItemFilter, type ItemSort } from '@/lib/itemQuery';
 import { HORIZON_COLOR, PLANE_GROUP_COLOR, STATUS_META, PRIORITY_COLOR } from '@/lib/constants';
 import { formatScore, riceScore } from '@/lib/rice';
@@ -44,14 +46,14 @@ import { ViewBar, NewButton } from '@/components/ViewBar';
 import { FilterButton, FilterPills, GroupButton, PropertiesButton, SearchToggle, SortButton } from '@/components/QueryControls';
 import { Avatar, Chip, EmptyState } from '@/components/ui/bits';
 import { ContextMenu, Tooltip } from '@/components/ui/Overlay';
-import { HorizonPicker, PersonPicker, PriorityPicker, StatusPicker, TagChip, TagPicker, TypePicker } from '@/components/pickers/Pickers';
+import { HorizonPicker, PersonPicker, PriorityPicker, SprintPicker, StatusPicker, TagChip, TagPicker, TypePicker } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
 import { RicePicker } from '@/components/pickers/RicePicker';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 import { itemMenuEntries } from '@/components/itemMenu';
 
 type Preset = 'all' | 'mine' | 'prioritize' | 'bugs';
-type Col = 'status' | 'priority' | 'assignee' | 'due' | 'rice' | 'estimate' | 'tags' | 'horizon' | 'plane';
+type Col = 'status' | 'priority' | 'assignee' | 'due' | 'sprint' | 'rice' | 'estimate' | 'tags' | 'horizon' | 'plane';
 
 interface BacklogSettings {
   filter: ItemFilter;
@@ -65,6 +67,7 @@ const COL_W: Record<Col, number> = {
   priority: 132,
   assignee: 168,
   due: 136,
+  sprint: 132,
   rice: 88,
   estimate: 84,
   tags: 184,
@@ -116,6 +119,7 @@ export function BacklogView() {
     { key: 'priority', label: t('prop.priority'), icon: <Flag size={14} /> },
     { key: 'assignee', label: t('prop.assignee'), icon: <User size={14} /> },
     { key: 'due', label: t('prop.due'), icon: <CalendarDays size={14} /> },
+    { key: 'sprint', label: t('prop.sprint'), icon: <IterationCw size={14} /> },
     { key: 'rice', label: 'RICE', icon: <Gauge size={14} /> },
     { key: 'estimate', label: t('prop.estimate'), icon: <Hourglass size={14} /> },
     { key: 'tags', label: t('prop.tags'), icon: <Tag size={14} /> },
@@ -169,7 +173,8 @@ function BacklogTable({
   useHotkey('escape', () => setSelected(new Set()), { enabled: selected.size > 0 });
 
   const visible = useMemo(() => sortItems(filterItems(items, settings.filter), settings.sort), [items, settings.filter, settings.sort]);
-  const groups = useMemo(() => groupItems(visible, settings.group, people), [visible, settings.group, people]);
+  const sprints = useProjectSprints(projectId);
+  const groups = useMemo(() => groupItems(visible, settings.group, people, false, sprints), [visible, settings.group, people, sprints]);
   const tree = useMemo(
     () =>
       groups.map((g) => ({
@@ -379,7 +384,16 @@ function GroupHeader({
 }) {
   const t = useT();
   const people = useData((s) => s.people);
+  const sprint = useData((s) => s.sprints[groupKey]);
   let label: ReactNode = groupKey;
+  if (field === 'sprint')
+    label = sprint ? (
+      <Chip color={sprint.status === 'active' ? 'blue' : sprint.status === 'completed' ? 'green' : 'gray'} dot>
+        {sprint.name}
+      </Chip>
+    ) : (
+      t('sprint.none')
+    );
   if (field === 'status')
     label = (
       <Chip color={STATUS_META[groupKey as Item['status']].color} dot>
@@ -517,6 +531,7 @@ function Row({
   const t = useT();
   const lang = useLang();
   const people = useData((s) => s.people);
+  const sprint = useData((s) => (item.sprintId ? s.sprints[item.sprintId] : undefined));
   const update = useData((s) => s.updateItem);
   const openPeek = useUI((s) => s.openPeek);
   const peekId = useUI((s) => s.peekItemId);
@@ -582,6 +597,20 @@ function Row({
               )}
             </CellButton>
           </DatePicker>
+        );
+      case 'sprint':
+        return (
+          <SprintPicker projectId={item.projectId} value={item.sprintId} onChange={(v) => set({ sprintId: v })}>
+            <CellButton>
+              {sprint ? (
+                <Chip color={sprint.status === 'active' ? 'blue' : sprint.status === 'completed' ? 'green' : 'gray'} dot>
+                  {sprint.name}
+                </Chip>
+              ) : (
+                <Empty />
+              )}
+            </CellButton>
+          </SprintPicker>
         );
       case 'rice':
         return (

@@ -1,7 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDownUp, ChevronDown, Eye, EyeOff, Filter, Layers, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useParams } from 'react-router';
+import { IterationCw } from 'lucide-react';
 import { useData } from '@/lib/store';
+import { sortSprints } from '@/lib/sprints';
 import { useT, type TKey } from '@/lib/i18n';
 import { ITEM_TYPES, PRIORITIES, STATUSES } from '@/lib/constants';
 import { EMPTY_FILTER, activeFilterCount, type GroupField, type ItemFilter, type ItemSort, type SortField } from '@/lib/itemQuery';
@@ -14,21 +17,26 @@ import { PriorityIcon, StatusIcon, TypeIcon } from './pickers/icons';
 import { tagColor } from './pickers/Pickers';
 import { BarButton } from './ViewBar';
 
-type FilterKey = 'status' | 'type' | 'priority' | 'assignee' | 'tags';
-const FILTER_KEYS: FilterKey[] = ['status', 'type', 'priority', 'assignee', 'tags'];
+type FilterKey = 'status' | 'type' | 'priority' | 'assignee' | 'tags' | 'sprint';
+const FILTER_KEYS: FilterKey[] = ['status', 'type', 'priority', 'assignee', 'tags', 'sprint'];
 const FILTER_LABEL: Record<FilterKey, TKey> = {
   status: 'filter.status',
   type: 'filter.type',
   priority: 'filter.priority',
   assignee: 'filter.assignee',
   tags: 'filter.tag',
+  sprint: 'filter.sprint',
 };
+const values = (f: ItemFilter, k: FilterKey): string[] => (f[k] as string[] | undefined) ?? [];
 
 function useFilterOptions(): Record<FilterKey, Option<string>[]> {
   const t = useT();
   const people = useData((s) => s.people);
   const items = useData((s) => s.items);
+  const allSprints = useData((s) => s.sprints);
+  const { projectId } = useParams();
   return useMemo(() => {
+    const sprints = sortSprints(Object.values(allSprints).filter((sp) => !projectId || sp.projectId === projectId));
     const tags = new Set<string>();
     Object.values(items).forEach((i) => i.tags.forEach((tg) => tags.add(tg)));
     return {
@@ -42,8 +50,16 @@ function useFilterOptions(): Record<FilterKey, Option<string>[]> {
       tags: [...tags]
         .sort()
         .map((tg) => ({ value: tg, label: tg, icon: <span data-color={tagColor(tg)} className="tint-solid h-2 w-2 rounded-full" /> })),
+      sprint: [
+        { value: 'none', label: t('sprint.none'), icon: <IterationCw size={14} className="text-fg-4" /> },
+        ...sprints.map((sp) => ({
+          value: sp.id,
+          label: `${sp.name}${sp.status === 'active' ? ` · ${t('sprint.status.active')}` : ''}`,
+          icon: <IterationCw size={14} className={sp.status === 'active' ? 'text-accent' : 'text-fg-3'} />,
+        })),
+      ],
     };
-  }, [people, items, t]);
+  }, [people, items, allSprints, projectId, t]);
 }
 
 export function FilterButton({ filter, onChange }: { filter: ItemFilter; onChange: (f: ItemFilter) => void }) {
@@ -70,10 +86,10 @@ export function FilterButton({ filter, onChange }: { filter: ItemFilter; onChang
       {key ? (
         <OptionList
           options={options[key]}
-          selected={filter[key] as string[]}
+          selected={values(filter, key)}
           placeholder={t(FILTER_LABEL[key])}
           onSelect={(v) => {
-            const cur = filter[key] as string[];
+            const cur = values(filter, key);
             onChange({ ...filter, [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] });
           }}
         />
@@ -86,7 +102,7 @@ export function FilterButton({ filter, onChange }: { filter: ItemFilter; onChang
               className="flex h-8 w-full items-center gap-2 rounded-[5px] px-2 text-left text-[14px] hover:bg-hover"
             >
               <span className="flex-1">{t(FILTER_LABEL[k])}</span>
-              {(filter[k] as string[]).length > 0 && <span className="text-[12px] text-accent">{(filter[k] as string[]).length}</span>}
+              {values(filter, k).length > 0 && <span className="text-[12px] text-accent">{values(filter, k).length}</span>}
             </button>
           ))}
           <div className="my-1 h-px bg-line" />
@@ -115,7 +131,7 @@ export function FilterButton({ filter, onChange }: { filter: ItemFilter; onChang
 export function FilterPills({ filter, onChange, extra }: { filter: ItemFilter; onChange: (f: ItemFilter) => void; extra?: ReactNode }) {
   const t = useT();
   const options = useFilterOptions();
-  const active = FILTER_KEYS.filter((k) => (filter[k] as string[]).length);
+  const active = FILTER_KEYS.filter((k) => values(filter, k).length);
   const show = active.length > 0 || filter.hideDone || !!extra;
   return (
     <AnimatePresence initial={false}>
@@ -129,8 +145,8 @@ export function FilterPills({ filter, onChange, extra }: { filter: ItemFilter; o
         >
           <div className="full-width flex flex-wrap items-center gap-1.5 py-2">
             {active.map((k) => {
-              const values = filter[k] as string[];
-              const labels = values.map((v) => options[k].find((o) => o.value === v)?.label ?? v);
+              const selected = values(filter, k);
+              const labels = selected.map((v) => options[k].find((o) => o.value === v)?.label ?? v);
               return (
                 <Popover
                   key={k}
@@ -144,8 +160,8 @@ export function FilterPills({ filter, onChange, extra }: { filter: ItemFilter; o
                 >
                   <OptionList
                     options={options[k]}
-                    selected={values}
-                    onSelect={(v) => onChange({ ...filter, [k]: values.includes(v) ? values.filter((x) => x !== v) : [...values, v] })}
+                    selected={selected}
+                    onSelect={(v) => onChange({ ...filter, [k]: selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v] })}
                   />
                   <div className="border-t border-line p-1">
                     <button
@@ -205,7 +221,7 @@ export function SortButton({ sort, onChange }: { sort: ItemSort; onChange: (s: I
   );
 }
 
-const GROUP_FIELDS: GroupField[] = ['none', 'status', 'type', 'priority', 'horizon', 'assignee'];
+const GROUP_FIELDS: GroupField[] = ['none', 'status', 'type', 'priority', 'horizon', 'assignee', 'sprint'];
 const GROUP_LABEL: Record<GroupField, TKey> = {
   none: 'backlog.group.none',
   status: 'backlog.group.status',
@@ -213,6 +229,7 @@ const GROUP_LABEL: Record<GroupField, TKey> = {
   priority: 'backlog.group.priority',
   horizon: 'backlog.group.horizon',
   assignee: 'filter.assignee',
+  sprint: 'prop.sprint',
 };
 
 export function GroupButton({

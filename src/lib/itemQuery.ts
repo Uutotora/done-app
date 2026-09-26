@@ -1,6 +1,6 @@
 import { HORIZONS, ITEM_TYPES, PRIORITIES, PRIORITY_RANK, STATUSES } from './constants';
 import { riceScore } from './rice';
-import type { Horizon, ID, Item, ItemStatus, ItemType, Person, Priority } from './types';
+import type { Horizon, ID, Item, ItemStatus, ItemType, Person, Priority, Sprint } from './types';
 import { matches } from './utils';
 
 export interface ItemFilter {
@@ -9,11 +9,13 @@ export interface ItemFilter {
   priority: Priority[];
   assignee: (ID | 'none')[];
   tags: string[];
+  /** Sprint ids or 'none'. Optional because views saved before sprints existed lack it. */
+  sprint?: (ID | 'none')[];
   search: string;
   hideDone: boolean;
 }
 
-export const EMPTY_FILTER: ItemFilter = { status: [], type: [], priority: [], assignee: [], tags: [], search: '', hideDone: false };
+export const EMPTY_FILTER: ItemFilter = { status: [], type: [], priority: [], assignee: [], tags: [], sprint: [], search: '', hideDone: false };
 
 export type SortField = 'manual' | 'rice' | 'priority' | 'due' | 'updated' | 'created' | 'title';
 export interface ItemSort {
@@ -21,10 +23,10 @@ export interface ItemSort {
   dir: 'asc' | 'desc';
 }
 
-export type GroupField = 'none' | 'status' | 'type' | 'horizon' | 'priority' | 'assignee';
+export type GroupField = 'none' | 'status' | 'type' | 'horizon' | 'priority' | 'assignee' | 'sprint';
 
 export function activeFilterCount(f: ItemFilter): number {
-  return f.status.length + f.type.length + f.priority.length + f.assignee.length + f.tags.length + (f.hideDone ? 1 : 0);
+  return f.status.length + f.type.length + f.priority.length + f.assignee.length + f.tags.length + (f.sprint?.length ?? 0) + (f.hideDone ? 1 : 0);
 }
 
 export function filterItems(items: Item[], f: ItemFilter): Item[] {
@@ -34,6 +36,7 @@ export function filterItems(items: Item[], f: ItemFilter): Item[] {
     if (f.priority.length && !f.priority.includes(i.priority)) return false;
     if (f.assignee.length && !f.assignee.includes(i.assigneeId ?? 'none')) return false;
     if (f.tags.length && !f.tags.some((t) => i.tags.includes(t))) return false;
+    if (f.sprint?.length && !f.sprint.includes(i.sprintId ?? 'none')) return false;
     if (f.hideDone && (i.status === 'done' || i.status === 'canceled')) return false;
     if (f.search && !matches(`${i.title} ${i.tags.join(' ')} ${i.plane?.key ?? ''}`, f.search)) return false;
     return true;
@@ -83,7 +86,13 @@ export interface ItemGroup {
 }
 
 /** Buckets items by a field, keeping empty buckets for fixed enums so boards keep their columns. */
-export function groupItems(items: Item[], field: GroupField, people: Record<ID, Person> = {}, keepEmpty = false): ItemGroup[] {
+export function groupItems(
+  items: Item[],
+  field: GroupField,
+  people: Record<ID, Person> = {},
+  keepEmpty = false,
+  sprints: Sprint[] = [],
+): ItemGroup[] {
   if (field === 'none') return [{ key: 'all', patch: {}, items }];
   const bucket = <T extends string>(
     values: readonly T[],
@@ -121,6 +130,16 @@ export function groupItems(items: Item[], field: GroupField, people: Record<ID, 
         (v) => ({ horizon: v }),
         'none',
       );
+    case 'sprint': {
+      // Open sprints keep their columns; finished ones only show up while they still hold items.
+      const ids = sprints.filter((sp) => sp.status !== 'completed' || items.some((i) => i.sprintId === sp.id)).map((sp) => sp.id);
+      return bucket(
+        ids,
+        (i) => (i.sprintId && ids.includes(i.sprintId) ? i.sprintId : undefined),
+        (v) => ({ sprintId: v }),
+        'none',
+      );
+    }
     case 'assignee': {
       const ids = Object.keys(people);
       return bucket(

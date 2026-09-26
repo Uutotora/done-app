@@ -38,6 +38,12 @@ export function daysFromToday(s: ISODate): number {
   return differenceInCalendarDays(fromISODate(s), new Date());
 }
 
+/** "d MMM" without relative words, for chart axes. */
+export function formatAxisDate(s: ISODate | undefined, lang: Lang): string {
+  if (!s) return '';
+  return format(fromISODate(s), 'd MMM', { locale: dateLocale(lang) }).replace('.', '');
+}
+
 export function formatShortDate(s: ISODate | undefined, lang: Lang): string {
   if (!s) return '';
   const d = fromISODate(s);

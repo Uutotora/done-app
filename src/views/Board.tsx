@@ -21,6 +21,7 @@ import { useUI } from '@/lib/ui';
 import { useT, type TKey } from '@/lib/i18n';
 import { useViewState } from '@/lib/viewState';
 import { useItems } from '@/lib/selectors';
+import { useProjectSprints } from '@/lib/sprints';
 import { EMPTY_FILTER, filterItems, groupItems, sortItems, type GroupField, type ItemFilter } from '@/lib/itemQuery';
 import { HORIZON_COLOR, PRIORITY_COLOR, STATUS_META, TYPE_META } from '@/lib/constants';
 import type { ColorName, ID, Item } from '@/lib/types';
@@ -32,7 +33,7 @@ import { Avatar, Chip } from '@/components/ui/bits';
 import { IconButton } from '@/components/ui/Button';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 
-interface BoardSettings {
+export interface BoardSettings {
   filter: ItemFilter;
   group: Exclude<GroupField, 'none'>;
   collapsed: string[];
@@ -54,7 +55,7 @@ export function BoardView() {
         <FilterButton filter={settings.filter} onChange={(filter) => set({ filter })} />
         <GroupButton
           group={settings.group}
-          fields={['status', 'priority', 'assignee', 'type', 'horizon']}
+          fields={['status', 'priority', 'assignee', 'type', 'horizon', 'sprint']}
           onChange={(g) => g !== 'none' && set({ group: g, collapsed: g === 'status' ? ['canceled'] : [] })}
         />
         <SearchToggle value={settings.filter.search} onChange={(search) => set({ filter: { ...settings.filter, search } })} />
@@ -66,7 +67,18 @@ export function BoardView() {
   );
 }
 
-function Board({ projectId, settings, onCollapse }: { projectId: ID; settings: BoardSettings; onCollapse: (c: string[]) => void }) {
+export function Board({
+  projectId,
+  settings,
+  onCollapse,
+  basePatch,
+}: {
+  projectId: ID;
+  settings: BoardSettings;
+  onCollapse: (c: string[]) => void;
+  /** Applied to items created inline, e.g. the sprint a sprint board shows. */
+  basePatch?: Partial<Item>;
+}) {
   const items = useItems(projectId);
   const people = useData((s) => s.people);
   const updateItem = useData((s) => s.updateItem);
@@ -80,7 +92,8 @@ function Board({ projectId, settings, onCollapse }: { projectId: ID; settings: B
   );
 
   const visible = useMemo(() => sortItems(filterItems(items, settings.filter), { field: 'manual', dir: 'asc' }), [items, settings.filter]);
-  const groups = useMemo(() => groupItems(visible, settings.group, people, true), [visible, settings.group, people]);
+  const sprints = useProjectSprints(projectId);
+  const groups = useMemo(() => groupItems(visible, settings.group, people, true, sprints), [visible, settings.group, people, sprints]);
   const base = useMemo(() => Object.fromEntries(groups.map((g) => [g.key, g.items.map((i) => i.id)])), [groups]);
   const cols = dragCols ?? base;
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -163,7 +176,7 @@ function Board({ projectId, settings, onCollapse }: { projectId: ID; settings: B
               key={g.key}
               field={settings.group}
               groupKey={g.key}
-              patch={g.patch}
+              patch={{ ...basePatch, ...g.patch }}
               projectId={projectId}
               ids={cols[g.key] ?? []}
               byId={byId}
@@ -186,7 +199,12 @@ function Board({ projectId, settings, onCollapse }: { projectId: ID; settings: B
 function useColumnLabel(field: GroupField, key: string): { label: ReactNode; color: ColorName } {
   const t = useT();
   const people = useData((s) => s.people);
+  const sprint = useData((s) => s.sprints[key]);
   switch (field) {
+    case 'sprint':
+      return sprint
+        ? { label: sprint.name, color: sprint.status === 'active' ? 'blue' : sprint.status === 'completed' ? 'green' : 'gray' }
+        : { label: t('sprint.none'), color: 'gray' };
     case 'status':
       return { label: t(`status.${key}` as TKey), color: STATUS_META[key as Item['status']].color };
     case 'priority':

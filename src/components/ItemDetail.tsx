@@ -14,6 +14,7 @@ import {
   Hourglass,
   Compass,
   FolderOpen,
+  IterationCw,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -39,6 +40,7 @@ import {
   PersonPicker,
   PriorityPicker,
   ProjectPicker,
+  SprintPicker,
   StatusPicker,
   TagChip,
   TagPicker,
@@ -57,6 +59,7 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
   const people = useData((s) => s.people);
   const items = useData((s) => s.items);
   const project = useData((s) => s.projects[item.projectId]);
+  const sprint = useData((s) => (item.sprintId ? s.sprints[item.sprintId] : undefined));
   const openPeek = useUI((s) => s.openPeek);
   const planeOk = useData((s) => planeReady(s.plane.config));
   const [pushing, setPushing] = useState(false);
@@ -158,6 +161,24 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
             <PropValue empty={!item.dueDate}>{item.dueDate ? formatRange(item.startDate, item.dueDate, lang) : t('prop.empty')}</PropValue>
           </DatePicker>
         </Prop>
+        {item.type !== 'initiative' && item.type !== 'milestone' && (
+          <Prop icon={<IterationCw size={15} />} label={t('prop.sprint')}>
+            <SprintPicker projectId={item.projectId} value={item.sprintId} onChange={(v) => set({ sprintId: v })}>
+              <PropValue empty={!sprint}>
+                {sprint ? (
+                  <span className="flex items-center gap-1.5">
+                    <Chip color={sprint.status === 'active' ? 'blue' : sprint.status === 'completed' ? 'green' : 'gray'} dot>
+                      {sprint.name}
+                    </Chip>
+                    <span className="text-[12px] text-fg-3">{formatRange(sprint.startDate, sprint.endDate, lang)}</span>
+                  </span>
+                ) : (
+                  t('prop.empty')
+                )}
+              </PropValue>
+            </SprintPicker>
+          </Prop>
+        )}
         <Prop icon={<Compass size={15} />} label={t('prop.horizon')}>
           <HorizonPicker value={item.horizon} onChange={(v) => set({ horizon: v })}>
             <PropValue empty={!item.horizon}>

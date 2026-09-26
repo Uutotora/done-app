@@ -7,15 +7,16 @@ export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
   use: {
-    baseURL: 'http://localhost:5174',
+    baseURL: 'http://127.0.0.1:5184',
     locale: 'ru-RU',
     viewport: { width: 1440, height: 900 },
     launchOptions: executablePath ? { executablePath } : undefined,
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } }],
   webServer: {
-    command: 'npx vite --port 5174 --strictPort',
-    url: 'http://localhost:5174',
-    reuseExistingServer: true,
+    command: 'npx vite --host 127.0.0.1 --port 5184 --strictPort',
+    url: 'http://127.0.0.1:5184',
+    reuseExistingServer: false,
+    env: { DONE_DB_PATH: ':memory:' },
   },
 });

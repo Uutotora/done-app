@@ -4,14 +4,22 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error plain ESM module shared with the production server
 import { planeProxy } from './server/planeProxy.mjs';
+// @ts-expect-error shared Node server module
+import { createAuthApi } from './server/auth.mjs';
 
 function planeProxyPlugin(): Plugin {
   return {
     name: 'done-plane-proxy',
     configureServer(server) {
+      const api = createAuthApi();
+      server.middlewares.use(api.handler);
+      server.httpServer?.once('close', () => api.close());
       server.middlewares.use('/api/plane', planeProxy);
     },
     configurePreviewServer(server) {
+      const api = createAuthApi();
+      server.middlewares.use(api.handler);
+      server.httpServer?.once('close', () => api.close());
       server.middlewares.use('/api/plane', planeProxy);
     },
   };

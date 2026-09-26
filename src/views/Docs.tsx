@@ -56,6 +56,7 @@ export function DocsView() {
   const create = (tpl?: TemplateId) => {
     const template = tpl ? templates(lang).find((x) => x.id === tpl) : undefined;
     const id = createDoc({ projectId, title: template?.title ?? '', icon: template?.icon, content: template?.content });
+    if (!id) return;
     navigate(`/docs/${id}`);
   };
 
@@ -102,7 +103,6 @@ export function DocsView() {
                       className="group block overflow-hidden rounded-xl border border-line bg-elevated transition-all hover:-translate-y-0.5 hover:shadow-md"
                     >
                       <div className="relative h-[120px] overflow-hidden border-b border-line bg-subtle px-4 pt-4">
-                        {d.cover && <div className="absolute inset-x-0 top-0 h-10" style={{ background: d.cover.value }} />}
                         <div className="relative line-clamp-5 text-[11.5px] leading-[1.55] text-fg-3">{blocksToText(d.content, 400) || ' '}</div>
                       </div>
                       <div className="flex items-center gap-2 px-3.5 py-3">

@@ -31,6 +31,7 @@ import { AutoTextarea, Avatar, Chip, DoneCheck, PageIcon, Progress } from './ui/
 import { Button } from './ui/Button';
 import { Editor } from './Editor';
 import { Comments } from './Comments';
+import { Dependencies } from './Dependencies';
 import { ActivityLog } from './ActivityLog';
 import {
   HorizonPicker,
@@ -84,7 +85,7 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
   };
 
   return (
-    <div className={cn(variant === 'page' ? 'page-width pb-40 pt-10' : 'px-12 pb-24 pt-6')}>
+    <div className={cn(variant === 'page' ? 'page-width pb-40 pt-10' : 'px-5 pb-24 pt-6 sm:px-10')}>
       {parent && (
         <button
           onClick={() => openPeek(parent.id)}
@@ -271,6 +272,8 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
         </Prop>
       </div>
 
+      <Dependencies key={`dependencies:${item.id}`} item={item} />
+
       {/* Children */}
       {(children.length > 0 || ['initiative', 'epic', 'feature'].includes(item.type)) && (
         <div className="mt-6">
@@ -387,7 +390,7 @@ function ChildRow({ id }: { id: ID }) {
 function Prop({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-8 items-start">
-      <div className="flex h-8 w-[160px] shrink-0 items-center gap-2 text-[14px] text-fg-3">
+      <div className="flex h-8 w-[115px] sm:w-[150px] shrink-0 items-center gap-2 text-[14px] text-fg-3">
         {icon}
         <span className="truncate">{label}</span>
       </div>

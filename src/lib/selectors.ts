@@ -43,10 +43,12 @@ export function progressOf(items: Item[]): { done: number; total: number; ratio:
 export function descendantsOf(id: ID, items: Item[]): Item[] {
   const out: Item[] = [];
   const queue = [id];
+  const visited = new Set<ID>([id]);
   while (queue.length) {
     const cur = queue.shift()!;
     for (const it of items) {
-      if (it.parentId === cur) {
+      if (it.parentId === cur && !visited.has(it.id)) {
+        visited.add(it.id);
         out.push(it);
         queue.push(it.id);
       }

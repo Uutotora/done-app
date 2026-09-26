@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { ArrowRight, Check, Sparkles, SquareDashed } from 'lucide-react';
 import { useState } from 'react';
 import { useData } from '@/lib/store';
@@ -40,14 +40,10 @@ export function Onboarding() {
       <motion.div
         className="pointer-events-none absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full opacity-40 blur-3xl"
         style={{ background: 'radial-gradient(circle, #a1c4fd 0%, transparent 70%)' }}
-        animate={{ x: [0, 60, 0], y: [0, 40, 0] }}
-        transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
         className="pointer-events-none absolute -bottom-48 -right-32 h-[560px] w-[560px] rounded-full opacity-40 blur-3xl"
         style={{ background: 'radial-gradient(circle, #fbc2eb 0%, transparent 70%)' }}
-        animate={{ x: [0, -50, 0], y: [0, -30, 0] }}
-        transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut' }}
       />
 
       <div className="absolute right-5 top-4 flex gap-1">
@@ -63,21 +59,23 @@ export function Onboarding() {
       </div>
 
       <div className="relative w-full max-w-[460px]">
-        <AnimatePresence mode="wait">
+        <>
           <motion.div
             key={step}
-            initial={{ opacity: 0, y: 16, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && canNext) (step === 4 ? finish : next)();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.target instanceof HTMLInputElement && canNext) {
+                e.preventDefault();
+                (step === 4 ? finish : next)();
+              }
             }}
           >
             {step === 0 && (
               <div className="text-center">
                 <div className="mb-8 flex justify-center">
-                  <Logo size={64} animate />
+                  <Logo size={48} animate />
                 </div>
                 <h1 className="mb-3 text-[40px] font-bold leading-tight tracking-[-0.02em]">{t('onb.welcome')}</h1>
                 <p className="mx-auto mb-10 max-w-[400px] text-[16px] leading-relaxed text-fg-2">{t('onb.welcomeSub')}</p>
@@ -156,7 +154,7 @@ export function Onboarding() {
               </Step>
             )}
           </motion.div>
-        </AnimatePresence>
+        </>
 
         {step > 0 && (
           <div className="mt-10 flex justify-center gap-1.5">

@@ -2,7 +2,6 @@ import { createEmptyData } from './store';
 import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
 import { shiftISO, todayISO } from './dates';
-import { GRADIENTS } from './constants';
 import { nowIso, uid } from './utils';
 import type { DataState, Doc, FileNode, ID, Item, Lang, Person, PlaneIssueLite, PlaneSnapshot, PlaneStateLite, Project } from './types';
 
@@ -26,7 +25,6 @@ export function createBlankData(input: OnboardingInput): DataState {
     name: L('Мой первый проект', 'My first project'),
     icon: '🌱',
     color: 'green',
-    cover: { kind: 'gradient', value: GRADIENTS[2] },
     status: 'on_track',
     leadId: data.meId,
     summary: '',
@@ -86,7 +84,6 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     name: L('Мобильное приложение 2.0', 'Mobile App 2.0'),
     icon: '📱',
     color: 'blue',
-    cover: { kind: 'gradient', value: GRADIENTS[3] },
     status: 'on_track',
     leadId: data.meId,
     startDate: d(-45),
@@ -120,7 +117,6 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     name: L('Запуск веб-кабинета', 'Web dashboard launch'),
     icon: '🌐',
     color: 'purple',
-    cover: { kind: 'gradient', value: GRADIENTS[7] },
     status: 'at_risk',
     leadId: data.meId,
     startDate: d(-20),
@@ -134,7 +130,6 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     name: L('Исследование рынка Q4', 'Q4 market research'),
     icon: '🔭',
     color: 'orange',
-    cover: { kind: 'gradient', value: GRADIENTS[0] },
     status: 'on_track',
     leadId: elena,
     startDate: d(-7),
@@ -656,7 +651,6 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
   const principles = doc({
     title: L('Принципы продукта', 'Product principles'),
     icon: '✨',
-    cover: { kind: 'gradient', value: GRADIENTS[12] },
     content: [
       B.quote(L('Мы делаем меньше, но лучше.', 'We do fewer things, better.')),
       B.h2(L('1. Ценность за первые 60 секунд', '1. Value in the first 60 seconds')),

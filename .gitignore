@@ -7,3 +7,8 @@ playwright-report
 .DS_Store
 .env
 .env.*
+
+.data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

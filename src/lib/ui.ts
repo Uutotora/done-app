@@ -24,6 +24,8 @@ interface LinkDialogState {
 
 interface UIState {
   hydrated: boolean;
+  mobileSidebarOpen: boolean;
+  setMobileSidebar: (open: boolean) => void;
   peekItemId?: ID;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
@@ -48,6 +50,8 @@ interface UIState {
 
 export const useUI = create<UIState>()((set) => ({
   hydrated: false,
+  mobileSidebarOpen: false,
+  setMobileSidebar: (open) => set({ mobileSidebarOpen: open }),
   paletteOpen: false,
   shortcutsOpen: false,
   createItem: { open: false },

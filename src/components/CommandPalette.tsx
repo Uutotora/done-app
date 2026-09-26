@@ -6,6 +6,7 @@ import {
   FilePlus,
   FolderPlus,
   House,
+  ListTodo,
   Keyboard,
   FolderOpen,
   Moon,
@@ -198,9 +199,20 @@ export function CommandPalette() {
                       k: 'new-project',
                       icon: <FolderPlus size={16} />,
                       label: t('cmd.newProject'),
-                      fn: () => navigate(`/p/${createProject({ name: '' })}/overview`),
+                      fn: () => {
+                        const id = createProject({ name: '' });
+                        if (id) navigate(`/p/${id}/overview`);
+                      },
                     },
-                    { k: 'new-doc', icon: <FilePlus size={16} />, label: t('cmd.newDoc'), fn: () => navigate(`/docs/${createDoc({})}`) },
+                    {
+                      k: 'new-doc',
+                      icon: <FilePlus size={16} />,
+                      label: t('cmd.newDoc'),
+                      fn: () => {
+                        const id = createDoc({});
+                        if (id) navigate(`/docs/${id}`);
+                      },
+                    },
                     {
                       k: 'theme',
                       icon: <Moon size={16} />,
@@ -230,6 +242,7 @@ export function CommandPalette() {
 
                 {(() => {
                   const nav = [
+                    { k: 'my-work', icon: <ListTodo size={16} />, label: t('nav.myWork'), to: '/my-work' },
                     { k: 'home', icon: <House size={16} />, label: t('nav.home'), to: '/' },
                     { k: 'cal', icon: <CalendarDays size={16} />, label: t('nav.calendar'), to: '/calendar' },
                     { k: 'road', icon: <ChartGantt size={16} />, label: t('nav.roadmap'), to: '/roadmap' },

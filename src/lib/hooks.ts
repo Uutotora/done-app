@@ -36,6 +36,7 @@ export function useHotkey(combo: string, handler: (e: KeyboardEvent) => void, op
     const needShift = parts.includes('shift');
     const needAlt = parts.includes('alt');
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.repeat) return;
       const mod = e.metaKey || e.ctrlKey;
       if (needMod !== mod) return;
       if (needAlt !== e.altKey) return;
@@ -114,4 +115,16 @@ export function useFileDrop(onFiles: (files: File[]) => void) {
       },
     },
   };
+}
+
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [query]);
+  return matches;
 }

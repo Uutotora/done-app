@@ -5,6 +5,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planeProxy } from './server/planeProxy.mjs';
+import { createAuthApi } from './server/auth.mjs';
+const auth = createAuthApi();
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), 'dist');
 const port = Number(process.env.PORT || 4173);
@@ -35,15 +37,30 @@ async function serveFile(res, file, cache) {
 createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
 
+  if (/^\/api\/(auth\/|admin\/|workspace$|blobs\/)/.test(url.pathname)) return auth.handler(req, res);
+
   if (url.pathname.startsWith('/api/plane/')) {
+    if (!auth.authenticate(req)) {
+      res.writeHead(401);
+      res.end('Sign in required');
+      return;
+    }
     req.url = req.url.slice('/api/plane'.length);
     return planeProxy(req, res);
   }
 
-  const safe = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400);
+    res.end('Invalid URL');
+    return;
+  }
+  const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   const file = join(root, safe);
   try {
-    if (file.startsWith(root) && (await stat(file)).isFile()) {
+    if (file.startsWith(root + '/') && (await stat(file)).isFile()) {
       return await serveFile(res, file, safe.startsWith('/assets/'));
     }
   } catch {

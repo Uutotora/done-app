@@ -9,7 +9,9 @@ import { TooltipProvider } from '@/components/ui/Overlay';
 import { AppShell } from '@/components/AppShell';
 import { Onboarding } from '@/views/Onboarding';
 import { Splash } from '@/components/Logo';
+import { AuthGate } from '@/components/AuthGate';
 import { Home } from '@/views/Home';
+import { MyWork } from '@/views/MyWork';
 import { ProjectLayout } from '@/views/project/ProjectLayout';
 import { Overview } from '@/views/project/Overview';
 import { RoadmapView } from '@/views/Roadmap';
@@ -23,6 +25,7 @@ import { NotFound } from '@/views/NotFound';
 const MapView = lazy(() => import('@/views/ProjectMap'));
 const DocPage = lazy(() => import('@/views/DocPage'));
 const ItemPage = lazy(() => import('@/views/ItemPage'));
+const Admin = lazy(() => import('@/views/Admin'));
 const Settings = lazy(() => import('@/views/Settings'));
 
 function useHydration() {
@@ -78,35 +81,39 @@ export function App() {
   return (
     <MotionConfig reducedMotion="user">
       <TooltipProvider>
-        {!onboarded ? (
-          <Onboarding />
-        ) : (
-          <BrowserRouter>
-            <Routes>
-              <Route element={<AppShell />}>
-                <Route index element={<Home />} />
-                <Route path="calendar" element={<CalendarView />} />
-                <Route path="roadmap" element={<RoadmapView />} />
-                <Route path="files" element={<FilesView />} />
-                <Route path="docs/:docId" element={<Lazy el={<DocPage />} />} />
-                <Route path="items/:itemId" element={<Lazy el={<ItemPage />} />} />
-                <Route path="settings/:tab?" element={<Lazy el={<Settings />} />} />
-                <Route path="p/:projectId" element={<ProjectLayout />}>
-                  <Route index element={<Navigate to="overview" replace />} />
-                  <Route path="overview" element={<Overview />} />
-                  <Route path="roadmap" element={<RoadmapView />} />
-                  <Route path="backlog" element={<BacklogView />} />
-                  <Route path="board" element={<BoardView />} />
+        <AuthGate>
+          {!onboarded ? (
+            <Onboarding />
+          ) : (
+            <BrowserRouter>
+              <Routes>
+                <Route element={<AppShell />}>
+                  <Route index element={<Home />} />
+                  <Route path="my-work" element={<MyWork />} />
                   <Route path="calendar" element={<CalendarView />} />
-                  <Route path="map" element={<Lazy el={<MapView />} />} />
-                  <Route path="docs" element={<DocsView />} />
+                  <Route path="roadmap" element={<RoadmapView />} />
                   <Route path="files" element={<FilesView />} />
+                  <Route path="docs/:docId" element={<Lazy el={<DocPage />} />} />
+                  <Route path="items/:itemId" element={<Lazy el={<ItemPage />} />} />
+                  <Route path="admin" element={<Lazy el={<Admin />} />} />
+                  <Route path="settings/:tab?" element={<Lazy el={<Settings />} />} />
+                  <Route path="p/:projectId" element={<ProjectLayout />}>
+                    <Route index element={<Navigate to="overview" replace />} />
+                    <Route path="overview" element={<Overview />} />
+                    <Route path="roadmap" element={<RoadmapView />} />
+                    <Route path="backlog" element={<BacklogView />} />
+                    <Route path="board" element={<BoardView />} />
+                    <Route path="calendar" element={<CalendarView />} />
+                    <Route path="map" element={<Lazy el={<MapView />} />} />
+                    <Route path="docs" element={<DocsView />} />
+                    <Route path="files" element={<FilesView />} />
+                  </Route>
+                  <Route path="*" element={<NotFound />} />
                 </Route>
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        )}
+              </Routes>
+            </BrowserRouter>
+          )}
+        </AuthGate>
       </TooltipProvider>
     </MotionConfig>
   );

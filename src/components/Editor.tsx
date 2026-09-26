@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 export interface EditorProps {
@@ -15,6 +16,7 @@ const EditorImpl = lazy(() => import('./EditorImpl'));
 
 /** Notion-style block editor (BlockNote), loaded on demand to keep the first paint light. */
 export function Editor(props: EditorProps) {
+  const viewer = useAuth((s) => s.user?.role === 'viewer');
   return (
     <Suspense
       fallback={
@@ -24,7 +26,7 @@ export function Editor(props: EditorProps) {
         </div>
       }
     >
-      <EditorImpl {...props} />
+      <EditorImpl {...props} editable={viewer ? false : props.editable} />
     </Suspense>
   );
 }

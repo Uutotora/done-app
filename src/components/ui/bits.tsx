@@ -260,8 +260,14 @@ export function PageIcon({ icon, size = 18, className }: { icon?: IconValue; siz
   }
   return (
     <span
-      className={cn('inline-flex shrink-0 select-none items-center justify-center leading-none', className)}
-      style={{ fontSize: size * 0.88, width: size, height: size }}
+      className={cn('page-emoji inline-flex shrink-0 select-none items-center justify-center leading-none', className)}
+      style={{
+        fontSize: size,
+        width: size,
+        height: size,
+        fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+        color: 'var(--text)',
+      }}
     >
       {icon}
     </span>
@@ -291,7 +297,7 @@ export const AutoTextarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttribut
       rows={1}
       value={value}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (!e.nativeEvent.isComposing && e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           (e.target as HTMLTextAreaElement).blur();
         }

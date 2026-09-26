@@ -53,6 +53,7 @@ export function CreateItemDialog() {
   const submit = () => {
     if (!draft.title.trim() || !draft.projectId) return;
     const id = createItem({ ...draft, title: draft.title.trim() });
+    if (!id) return;
     toast({
       message: t('item.created', { title: draft.title.trim() }),
       tone: 'success',
@@ -68,7 +69,7 @@ export function CreateItemDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && close()} position="top" className="max-w-[640px]" title={t('create.title')}>
       <div
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (e.target as HTMLElement).tagName === 'INPUT')) {
+          if (!e.nativeEvent.isComposing && e.key === 'Enter' && (e.metaKey || e.ctrlKey || (e.target as HTMLElement).tagName === 'INPUT')) {
             e.preventDefault();
             submit();
           }

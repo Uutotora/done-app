@@ -1,8 +1,10 @@
-import { AnimatePresence, motion } from 'motion/react';
+import { useEffect } from 'react';
+import { useT } from '@/lib/i18n';
 import { Outlet, useLocation, useMatch } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { useHotkey, useIsDark } from '@/lib/hooks';
+import { SyncNotice } from './AccountStatus';
 import { Sidebar } from './Sidebar';
 import { Toaster } from './Toaster';
 import { Celebration } from './Celebration';
@@ -15,6 +17,10 @@ import { FilePreview } from './files/FilePreview';
 
 export function AppShell() {
   const location = useLocation();
+  const t = useT();
+  useEffect(() => {
+    useUI.getState().openPeek(undefined);
+  }, [location.pathname]);
   const setPrefs = useData((s) => s.setPrefs);
   const isDark = useIsDark();
   const ui = useUI();
@@ -56,20 +62,17 @@ export function AppShell() {
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-bg text-fg">
+      <a href="#main-content" className="skip-link">
+        {t('nav.skip')}
+      </a>
       <Sidebar />
-      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={sectionKey}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="flex min-h-0 flex-1 flex-col"
-          >
+      <main id="main-content" tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <SyncNotice />
+        <>
+          <div key={sectionKey} className="flex min-h-0 flex-1 flex-col">
             <Outlet />
-          </motion.div>
-        </AnimatePresence>
+          </div>
+        </>
       </main>
       <SidePeek />
       <CommandPalette />

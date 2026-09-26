@@ -7,7 +7,8 @@
 /* ------------------------------------------------------------------ */
 :root {
   --bg: #ffffff;
-  --bg-sidebar: #f8f8f7;
+  --bg-sidebar: #f8f7f5;
+  --sidebar-selected: #eeedeb;
   --bg-elevated: #ffffff;
   --bg-subtle: #f7f7f5;
   --bg-hover: rgba(55, 53, 47, 0.06);
@@ -64,6 +65,7 @@
 .dark {
   --bg: #191919;
   --bg-sidebar: #202020;
+  --sidebar-selected: #303030;
   --bg-elevated: #252525;
   --bg-subtle: #202020;
   --bg-hover: rgba(255, 255, 255, 0.055);
@@ -200,7 +202,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--accent-soft);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
@@ -482,6 +484,8 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
 }
@@ -563,4 +567,83 @@
 }
 .animate-row-in {
   animation: row-in 220ms var(--ease-out-soft);
+}
+
+/* Sidebar interactions keep text and emoji stable; only controls crossfade. */
+.workspace-sidebar {
+  --text-2: #62615e;
+  --text-3: #91908c;
+}
+.dark .workspace-sidebar {
+  --text-2: #c0bfbd;
+  --text-3: #8e8d89;
+}
+.workspace-sidebar .sidebar-row {
+  transition:
+    background-color 100ms ease-out,
+    color 100ms ease-out;
+}
+.page-emoji {
+  opacity: 1;
+  filter: none;
+  font-variant-emoji: emoji;
+}
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  transform: translateY(-160%);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+[role='dialog'],
+[data-radix-popper-content-wrapper] {
+  overscroll-behavior: contain;
+}
+@media (max-width: 767px) {
+  .full-width,
+  .page-width {
+    padding-inline: 16px;
+  }
+  .workspace-sidebar {
+    max-width: 85vw;
+  }
+}
+@media (hover: none) {
+  .workspace-sidebar [class*='opacity-0'] {
+    opacity: 1;
+  }
+  .workspace-sidebar [class*='group-hover/row:opacity-0'] {
+    opacity: 0;
+  }
+}
+
+.auth-input {
+  display: block;
+  margin-top: 6px;
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.auth-input:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
 }

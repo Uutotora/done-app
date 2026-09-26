@@ -1,9 +1,10 @@
 import { ChevronsRight, Moon, Star, Sun } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { useUI } from '@/lib/ui';
 import { useData } from '@/lib/store';
 import { useT } from '@/lib/i18n';
-import { useIsDark } from '@/lib/hooks';
+import { useIsDark, useMediaQuery } from '@/lib/hooks';
 import type { Ref } from '@/lib/types';
 import { cn, modKey } from '@/lib/utils';
 import { IconButton } from './ui/Button';
@@ -18,6 +19,8 @@ export interface Crumb {
 
 export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb[]; actions?: ReactNode; favorite?: Ref; className?: string }) {
   const t = useT();
+  const mobile = useMediaQuery('(max-width: 767px)');
+  const setMobileOpen = useUI((s) => s.setMobileSidebar);
   const collapsed = useData((s) => s.prefs.sidebarCollapsed);
   const setPrefs = useData((s) => s.setPrefs);
   const isDark = useIsDark();
@@ -26,9 +29,9 @@ export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb
 
   return (
     <header className={cn('sticky top-0 z-10 flex h-11 shrink-0 items-center gap-1 bg-bg/90 px-3 backdrop-blur-md', className)}>
-      {collapsed && (
+      {(collapsed || mobile) && (
         <Tooltip content={t('nav.expand')} shortcut={`${modKey()} \\`}>
-          <IconButton size="md" onClick={() => setPrefs({ sidebarCollapsed: false })} label={t('nav.expand')}>
+          <IconButton size="md" onClick={() => (mobile ? setMobileOpen(true) : setPrefs({ sidebarCollapsed: false }))} label={t('nav.expand')}>
             <ChevronsRight size={18} />
           </IconButton>
         </Tooltip>
@@ -55,8 +58,12 @@ export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb
         {actions}
         {favorite && (
           <Tooltip content={isFav ? t('common.removeFromFavorites') : t('common.addToFavorites')}>
-            <IconButton size="md" onClick={() => toggleFavorite(favorite)} label={t('common.addToFavorites')}>
-              <Star size={17} className={cn('transition-all', isFav && 'scale-110 fill-[#f5c518] text-[#f5c518]')} />
+            <IconButton
+              size="md"
+              onClick={() => toggleFavorite(favorite)}
+              label={isFav ? t('common.removeFromFavorites') : t('common.addToFavorites')}
+            >
+              <Star size={17} className={cn('transition-[color,transform]', isFav && 'scale-110 fill-[#f5c518] text-[#f5c518]')} />
             </IconButton>
           </Tooltip>
         )}

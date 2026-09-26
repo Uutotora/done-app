@@ -1,23 +1,22 @@
-import { motion } from 'motion/react';
-import { CalendarDays, Diamond, FolderOpen, ImageIcon, ListTodo, TrendingUp } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { CalendarDays, Diamond, FolderOpen, ListTodo, TrendingUp } from 'lucide-react';
+import { useMemo, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { useLang, useT } from '@/lib/i18n';
 import { formatRange, formatShortDate, timeAgo, todayISO } from '@/lib/dates';
-import { PROJECT_STATUS_COLOR, GRADIENTS } from '@/lib/constants';
+import { PROJECT_STATUS_COLOR } from '@/lib/constants';
 import { isClosed, progressOf, useItems } from '@/lib/selectors';
 import { Editor } from '@/components/Editor';
 import { AutoTextarea, Avatar, AvatarStack, Chip, PageIcon, Progress, SectionTitle } from '@/components/ui/bits';
-import { CoverPicker, IconPicker } from '@/components/pickers/IconPicker';
+import { IconPicker } from '@/components/pickers/IconPicker';
 import { PersonPicker, ProjectStatusPicker } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
 import { StatusIcon, TypeIcon } from '@/components/pickers/icons';
 import { PlanePanel } from '@/components/PlanePanel';
 import { TabsBar } from './ProjectLayout';
 import type { Person } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { ProjectHealth } from '@/components/ProjectHealth';
 
 export function Overview() {
   const t = useT();
@@ -31,7 +30,6 @@ export function Overview() {
   const openPeek = useUI((s) => s.openPeek);
   const items = useItems(projectId);
   const fileCount = useData((s) => Object.values(s.files).filter((f) => f.projectId === projectId && f.kind !== 'folder').length);
-  const [hoverHeader, setHoverHeader] = useState(false);
 
   const prog = progressOf(items);
   const open = items.filter((i) => !isClosed(i) && i.type !== 'milestone' && i.type !== 'initiative').length;
@@ -55,41 +53,17 @@ export function Overview() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div onMouseEnter={() => setHoverHeader(true)} onMouseLeave={() => setHoverHeader(false)}>
-        {project.cover && (
-          <div className="group relative h-[180px] w-full" style={{ background: project.cover.value }}>
-            <div className="absolute bottom-3 right-4 opacity-0 transition-opacity group-hover:opacity-100">
-              <CoverPicker value={project.cover} onChange={(c) => set({ cover: c })}>
-                <button className="rounded-md bg-white/80 px-2.5 py-1 text-[12.5px] font-medium text-[#37352f] shadow-sm backdrop-blur hover:bg-white">
-                  {t('project.changeCover')}
-                </button>
-              </CoverPicker>
-            </div>
-          </div>
-        )}
-        <div className="full-width">
-          <div className={cn('relative z-10', project.cover ? '-mt-11' : 'mt-10')}>
+      <div>
+        <div className="full-width pt-7">
+          <div className="mb-3">
             <IconPicker value={project.icon} onChange={(v) => set({ icon: v ?? '📁' })} allowRemove={false}>
-              <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
-                className="flex h-[78px] w-[78px] items-center justify-center rounded-lg hover:bg-hover"
+              <button
+                aria-label={t('docs.addIcon')}
+                className="flex h-12 w-12 items-center justify-center rounded-lg transition-colors hover:bg-hover"
               >
-                <PageIcon icon={project.icon} size={72} />
-              </motion.button>
+                <PageIcon icon={project.icon} size={40} />
+              </button>
             </IconPicker>
-          </div>
-          <div className="flex h-8 items-center gap-1">
-            {!project.cover && (
-              <motion.div animate={{ opacity: hoverHeader ? 1 : 0 }}>
-                <button
-                  onClick={() => set({ cover: { kind: 'gradient', value: GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)] } })}
-                  className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[13.5px] text-fg-3 hover:bg-hover"
-                >
-                  <ImageIcon size={15} /> {t('project.addCover')}
-                </button>
-              </motion.div>
-            )}
           </div>
           <AutoTextarea
             key={project.id}
@@ -97,7 +71,7 @@ export function Overview() {
             autoFocus={!project.name}
             placeholder={t('project.untitled')}
             onBlur={(e) => e.target.value !== project.name && set({ name: e.target.value })}
-            className="text-[40px] font-bold leading-[1.2] tracking-[-0.02em] placeholder:text-fg-4"
+            className="text-[32px] font-bold leading-[1.2] tracking-[-0.02em] placeholder:text-fg-4"
           />
           <input
             key={`${project.id}-summary`}
@@ -105,6 +79,7 @@ export function Overview() {
             placeholder={t('project.summaryPlaceholder')}
             onBlur={(e) => e.target.value !== (project.summary ?? '') && set({ summary: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            aria-label={t('project.summaryPlaceholder')}
             className="mt-1 w-full bg-transparent text-[17px] text-fg-2 outline-none placeholder:text-fg-4"
           />
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -137,13 +112,22 @@ export function Overview() {
         <TabsBar projectId={project.id} active={tab} t={t} />
       </div>
 
+      <div className="full-width pt-6">
+        <ProjectHealth projectId={project.id} />
+      </div>
+
       <div className="full-width grid grid-cols-1 gap-10 pb-32 pt-8 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Stat icon={<TrendingUp size={15} />} label={t('project.stats.progress')} value={`${Math.round(prog.ratio * 100)}%`}>
               <Progress value={prog.ratio} className="mt-2" />
             </Stat>
-            <Stat icon={<ListTodo size={15} />} label={t('project.stats.open')} value={String(open)} />
+            <Stat
+              icon={<ListTodo size={15} />}
+              label={t('project.stats.open')}
+              value={String(open)}
+              onClick={() => navigate(`/p/${project.id}/backlog`)}
+            />
             <Stat
               icon={<Diamond size={15} />}
               label={t('project.stats.nextMilestone')}
@@ -212,8 +196,19 @@ function Stat({
   onClick?: () => void;
 }) {
   return (
-    <motion.div
-      whileHover={onClick ? { y: -2 } : undefined}
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       onClick={onClick}
       data-peek-keep
       className={`rounded-xl border border-line p-3.5 ${onClick ? 'cursor-pointer hover:bg-hover' : ''}`}
@@ -225,6 +220,6 @@ function Stat({
       <div className="mt-1.5 text-[22px] font-semibold tabular-nums tracking-[-0.01em]">{value}</div>
       {sub && <div className="truncate text-[12.5px] text-fg-3">{sub}</div>}
       {children}
-    </motion.div>
+    </div>
   );
 }

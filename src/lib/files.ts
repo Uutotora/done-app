@@ -1,5 +1,5 @@
 import { useData } from './store';
-import { putFileBlob } from './storage';
+import { putFileBlob, syncFileBlob, isRemoteStorage } from './storage';
 import type { FileNode, ID } from './types';
 import { nowIso, uid } from './utils';
 
@@ -90,10 +90,15 @@ export function defaultLinkName(url: string, lang: 'ru' | 'en'): string {
 }
 
 export async function uploadFiles(files: File[], opts: { projectId?: ID; parentId?: ID }): Promise<ID[]> {
+  if (isRemoteStorage()) {
+    const { canEditProject } = await import('./auth');
+    if (!canEditProject(opts.projectId)) throw new Error('Read-only access');
+  }
   const ids: ID[] = [];
   for (const file of files) {
+    if (isRemoteStorage() && file.size > 20 * 1024 * 1024) throw new Error('Maximum shared file size is 20 MB');
     const id = uid('f');
-    await putFileBlob(id, file);
+    if (!isRemoteStorage()) await putFileBlob(id, file);
     const ts = nowIso();
     const node: FileNode = {
       id,
@@ -107,6 +112,12 @@ export async function uploadFiles(files: File[], opts: { projectId?: ID; parentI
       updatedAt: ts,
     };
     useData.getState().addFile(node);
+    try {
+      await syncFileBlob(id, file);
+    } catch (error) {
+      useData.getState().deleteNodes([id]);
+      throw error;
+    }
     ids.push(id);
   }
   return ids;

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { idbStateStorage } from './storage';
 import { nowIso, uid } from './utils';
+import { allowMutation } from './mutationPolicy';
+import { canDependOn } from './work';
 import { PLANE_DEFAULTS, DEFAULT_AI_MODEL, PLANE_GROUP_TO_STATUS } from './constants';
 import type {
   Activity,
@@ -343,6 +345,7 @@ export const useData = create<Store>()(
             id: nid,
             projectId: copyId,
             parentId: it.parentId ? idMap.get(it.parentId) : undefined,
+            dependsOn: it.dependsOn?.map((dep) => idMap.get(dep) ?? dep),
             plane: undefined,
             createdAt: ts,
             updatedAt: ts,
@@ -408,27 +411,51 @@ export const useData = create<Store>()(
         }));
         return id;
       },
-      updateItem: (id, patch) =>
-        set((s) => {
-          const prev = s.items[id];
-          if (!prev) return {};
-          const ts = nowIso();
-          const next: Item = { ...prev, ...patch, updatedAt: ts };
-          if (patch.status && patch.status !== prev.status) {
-            next.completedAt = patch.status === 'done' ? ts : undefined;
-          }
-          return { items: { ...s.items, [id]: next }, activity: withActivity(s.activity, diffActivity(prev, next, s.meId, ts)) };
-        }),
+      updateItem: (id, patch) => get().updateItems([id], patch),
       updateItems: (ids, patch) =>
         set((s) => {
+          if (patch.projectId && !s.projects[patch.projectId]) return {};
           const items = { ...s.items };
           const ts = nowIso();
           const acts: Activity[] = [];
-          for (const id of ids) {
+          const moving = new Set(ids);
+          if (patch.projectId) {
+            let grew = true;
+            while (grew) {
+              grew = false;
+              for (const item of Object.values(items)) {
+                if (item.parentId && moving.has(item.parentId) && !moving.has(item.id)) {
+                  moving.add(item.id);
+                  grew = true;
+                }
+              }
+            }
+          }
+          for (const id of moving) {
             const prev = items[id];
             if (!prev) continue;
-            const next: Item = { ...prev, ...patch, updatedAt: ts };
-            if (patch.status && patch.status !== prev.status) next.completedAt = patch.status === 'done' ? ts : undefined;
+            const changes = ids.includes(id) ? patch : { projectId: patch.projectId };
+            const next: Item = { ...prev, ...changes, id, updatedAt: ts };
+            if (changes.projectId && changes.projectId !== prev.projectId) {
+              next.plane = undefined;
+              if (next.parentId && !moving.has(next.parentId)) next.parentId = undefined;
+            }
+            if (next.parentId) {
+              const visited = new Set<ID>([id]);
+              let cursor: ID | undefined = next.parentId;
+              let invalid = !items[cursor] || (items[cursor].projectId !== next.projectId && !moving.has(cursor));
+              while (cursor && !invalid) {
+                if (visited.has(cursor)) {
+                  invalid = true;
+                  break;
+                }
+                visited.add(cursor);
+                cursor = items[cursor]?.parentId;
+              }
+              if (invalid) next.parentId = prev.parentId;
+            }
+            if (changes.dependsOn) next.dependsOn = [...new Set(changes.dependsOn)].filter((dep) => canDependOn(id, dep, items));
+            if (changes.status && changes.status !== prev.status) next.completedAt = changes.status === 'done' ? ts : undefined;
             items[id] = next;
             acts.push(...diffActivity(prev, next, s.meId, ts));
           }
@@ -455,7 +482,13 @@ export const useData = create<Store>()(
         for (const it of Object.values(items)) {
           if (it.parentId && idSet.has(it.parentId)) {
             snapItems[it.id] = it;
-            items[it.id] = { ...it, parentId: s.items[it.parentId]?.parentId };
+            let parentId = s.items[it.parentId]?.parentId;
+            const seen = new Set<ID>([it.id]);
+            while (parentId && idSet.has(parentId) && !seen.has(parentId)) {
+              seen.add(parentId);
+              parentId = s.items[parentId]?.parentId;
+            }
+            items[it.id] = { ...it, parentId: parentId && !seen.has(parentId) ? parentId : undefined };
           }
         }
         const commentIds = Object.values(s.comments)
@@ -488,8 +521,10 @@ export const useData = create<Store>()(
           if (!moving) return {};
           // Refuse to nest a page inside itself or its own sub-pages.
           let cursor = parentId;
+          const visited = new Set<ID>([id]);
           while (cursor) {
-            if (cursor === id) return {};
+            if (visited.has(cursor)) return {};
+            visited.add(cursor);
             cursor = s.docs[cursor]?.parentId;
           }
           const projectId = parentId ? s.docs[parentId]?.projectId : moving.projectId;
@@ -497,6 +532,18 @@ export const useData = create<Store>()(
           const ordered = reorder(siblings, { ...moving, parentId, projectId }, beforeId);
           const docs = { ...s.docs };
           for (const d of ordered) docs[d.id] = d;
+          const moved = new Set<ID>([id]);
+          let grew = true;
+          while (grew) {
+            grew = false;
+            for (const d of Object.values(docs)) {
+              if (d.parentId && moved.has(d.parentId) && !moved.has(d.id)) {
+                moved.add(d.id);
+                docs[d.id] = { ...d, projectId };
+                grew = true;
+              }
+            }
+          }
           return { docs };
         }),
       duplicateDoc: (id) => {
@@ -745,3 +792,28 @@ export function isDataState(x: unknown): x is DataState {
     typeof d.prefs === 'object'
   );
 }
+
+// Keep permission checks at the action boundary so every view follows the same policy.
+const guardedActions = Object.fromEntries(
+  Object.entries(useData.getState())
+    .filter(
+      ([key, value]) =>
+        typeof value === 'function' &&
+        ![
+          'replaceAll',
+          'setPrefs',
+          'setExpanded',
+          'toggleFavorite',
+          'touchRecent',
+          'setAi',
+          'setPlaneConfig',
+          'setPlaneSnapshot',
+          'pruneTrash',
+        ].includes(key),
+    )
+    .map(([key, action]) => [
+      key,
+      (...args: unknown[]) => (allowMutation(key, args) ? (action as (...values: unknown[]) => unknown)(...args) : undefined),
+    ]),
+);
+useData.setState(guardedActions);

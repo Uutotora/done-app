@@ -14,6 +14,7 @@ import { ContextMenu, EntriesMenu } from './ui/Overlay';
 import { IconButton } from './ui/Button';
 import { PriorityIcon, StatusIcon, TypeIcon } from './pickers/icons';
 import { TagChip } from './pickers/Pickers';
+import { blockersOf, isFinished } from '@/lib/work';
 import { itemMenuEntries } from './itemMenu';
 
 export interface CardOptions {
@@ -39,7 +40,7 @@ export const ItemCard = forwardRef<
     return { total: kids.length, done: kids.filter((k) => k.status === 'done').length };
   }, [itemsRec, item.id]);
   const score = riceScore(item.rice);
-  const overdue = item.dueDate && item.dueDate < todayISO() && item.status !== 'done';
+  const overdue = item.dueDate && item.dueDate < todayISO() && !isFinished(item);
 
   return (
     <ContextMenu entries={itemMenuEntries(item)} disabled={overlay}>
@@ -106,6 +107,9 @@ export const ItemCard = forwardRef<
           </div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 whitespace-nowrap text-[12px] text-fg-3">
+          {blockersOf(item, itemsRec).length > 0 && !isFinished(item) && (
+            <span className="rounded bg-[var(--c-orange-bg)] px-1.5 text-[var(--c-orange-text)]">{t('work.blocked')}</span>
+          )}
           {item.priority !== 'none' && <PriorityIcon priority={item.priority} />}
           {show.rice && score != null && (
             <span className="rounded bg-hover px-1.5 py-[1px] font-medium tabular-nums text-fg-2" title="RICE">

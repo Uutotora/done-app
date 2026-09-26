@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useUI } from '@/lib/ui';
 
@@ -6,6 +6,7 @@ const COLORS = ['#4dab7a', '#3e8fd6', '#e2b340', '#d45d9c', '#9a6dd7', '#e9883c'
 
 /** A small burst of confetti where an item was completed. The signature "Done" moment. */
 export function Celebration() {
+  const reducedMotion = useReducedMotion();
   const celebrate = useUI((s) => s.celebrate);
   const [active, setActive] = useState<typeof celebrate>();
   useEffect(() => {
@@ -32,6 +33,7 @@ export function Celebration() {
     [active?.key],
   );
 
+  if (reducedMotion) return null;
   return (
     <div className="pointer-events-none fixed inset-0 z-[80]">
       <AnimatePresence>

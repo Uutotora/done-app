@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-test('onboarding, tasks, roadmap, files and trash', async ({ page }) => {
+test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
   await page.goto('/');
+  await page.getByRole('button', { name: 'Попробовать демо' }).click();
   await page.getByRole('button', { name: 'Начать' }).click();
   await page.getByPlaceholder('Ваше имя').fill('Тест Тестов');
   await page.keyboard.press('Enter');
@@ -32,7 +33,20 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }) => {
   await row.hover();
   await row.getByRole('button', { name: 'Открыть' }).click();
   await expect(page.getByRole('complementary').getByText('Критерии готовности')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Добавить зависимость' }).click();
+  await page.getByPlaceholder('Найти задачу…').fill('Проверить релиз');
+  await page.getByRole('button', { name: /Проверить релиз/ }).click();
+  await expect(page.getByText('Ожидает завершения · 1')).toBeVisible();
   await page.keyboard.press('Escape');
+
+  await page.getByRole('main').getByRole('link', { name: 'Доска', exact: true }).click();
+  await expect(page.getByText('Регистрация по номеру телефона').first()).toBeVisible();
+  await page.getByRole('main').getByRole('link', { name: 'Календарь', exact: true }).click();
+  await expect(page.getByRole('main')).toContainText('Сегодня');
+  await page.getByRole('main').getByRole('link', { name: 'Карта', exact: true }).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  await page.getByRole('main').getByRole('link', { name: 'Документы', exact: true }).click();
+  await expect(page.getByRole('main')).toContainText('PRD');
 
   // Files: add a Plaud link.
   await page.getByRole('main').getByRole('link', { name: 'Файлы' }).click();
@@ -50,5 +64,25 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }) => {
   await page.getByRole('button', { name: 'Восстановить' }).first().click();
   await expect(page.getByRole('link', { name: 'Заметки 1:1 с Дмитрием' })).toBeVisible();
 
+  await page.keyboard.press('Escape');
+  await page.getByRole('link', { name: 'Мои задачи', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Мои задачи', exact: true })).toBeVisible();
+  await expect(page.locator('[data-radix-popper-content-wrapper]')).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveCount(0, { timeout: 10000 });
+  await page.screenshot({ path: testInfo.outputPath('my-work.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: 'Переключить тему' }).click();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await page.screenshot({ path: testInfo.outputPath('my-work-dark.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('complementary', { name: 'Проекты', exact: true })).toBeHidden();
+  await page.getByRole('button', { name: 'Развернуть сайдбар', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Проекты', exact: true })).toBeVisible();
+  await page.getByRole('complementary', { name: 'Проекты', exact: true }).getByRole('link', { name: 'Главная', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Тест/ })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Проекты', exact: true })).toBeHidden();
+  await expect(page.locator('.workspace-sidebar')).toHaveCSS('width', '0px');
+  await expect(page.getByRole('heading', { name: /Тест/ }).locator('..')).toHaveCSS('opacity', '1');
+  await page.screenshot({ path: testInfo.outputPath('mobile-home.png'), animations: 'disabled' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });

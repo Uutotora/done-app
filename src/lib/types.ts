@@ -109,6 +109,8 @@ export interface Item {
   tags: string[];
   rice?: Rice;
   parentId?: ID;
+  /** Tasks that must finish before this item can start. */
+  dependsOn?: ID[];
   order: number;
   content?: unknown[];
   plane?: PlaneIssueRef;

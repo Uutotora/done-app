@@ -4,10 +4,20 @@ import type { StateStorage } from 'zustand/middleware';
 const stateStore = typeof indexedDB !== 'undefined' ? createStore('done-state', 'kv') : undefined;
 const fileStore = typeof indexedDB !== 'undefined' ? createStore('done-files', 'blobs') : undefined;
 
+let remoteStorage = false;
+export const isRemoteStorage = () => remoteStorage;
+export function setRemoteStorage(value: boolean) {
+  remoteStorage = value;
+  clearFileUrls();
+  if (value) {
+    pending.clear();
+    if (timer) clearTimeout(timer);
+  }
+}
 const pending = new Map<string, string>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
-async function flush(): Promise<void> {
+export async function flushLocalStorage(): Promise<void> {
   if (timer) clearTimeout(timer);
   timer = undefined;
   const entries = [...pending.entries()];
@@ -16,9 +26,9 @@ async function flush(): Promise<void> {
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('beforeunload', () => void flush());
+  window.addEventListener('beforeunload', () => void flushLocalStorage());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void flush();
+    if (document.visibilityState === 'hidden') void flushLocalStorage();
   });
 }
 
@@ -40,6 +50,7 @@ export const idbStateStorage: StateStorage = {
     }
   },
   setItem: (name, value) => {
+    if (remoteStorage) return;
     if (!stateStore) {
       try {
         localStorage.setItem(name, value);
@@ -50,7 +61,7 @@ export const idbStateStorage: StateStorage = {
     }
     pending.set(name, value);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void flush(), 250);
+    timer = setTimeout(() => void flushLocalStorage(), 250);
   },
   removeItem: async (name) => {
     pending.delete(name);
@@ -64,6 +75,11 @@ export async function putFileBlob(id: string, blob: Blob): Promise<void> {
 }
 
 export async function getFileBlob(id: string): Promise<Blob | undefined> {
+  if (remoteStorage) {
+    const response = await fetch(`/api/blobs/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+    if (!response.ok) return undefined;
+    return response.blob();
+  }
   if (!fileStore) return undefined;
   return get<Blob>(id, fileStore);
 }
@@ -81,11 +97,32 @@ export async function collectGarbageBlobs(liveIds: Set<string>): Promise<void> {
 }
 
 const urlCache = new Map<string, string>();
+function clearFileUrls() {
+  for (const url of urlCache.values()) URL.revokeObjectURL(url);
+  urlCache.clear();
+}
 export async function getFileUrl(id: string): Promise<string | undefined> {
-  if (urlCache.has(id)) return urlCache.get(id);
+  if (!remoteStorage && urlCache.has(id)) return urlCache.get(id);
   const blob = await getFileBlob(id);
   if (!blob) return undefined;
   const url = URL.createObjectURL(blob);
+  const previous = urlCache.get(id);
+  if (previous) URL.revokeObjectURL(previous);
   urlCache.set(id, url);
   return url;
+}
+
+export async function syncFileBlob(id: string, blob: Blob): Promise<void> {
+  if (!remoteStorage) return;
+  if (blob.size > 20 * 1024 * 1024) throw new Error('Maximum shared file size is 20 MB');
+  const { api, flushWorkspace, useAuth } = await import('./auth');
+  await flushWorkspace();
+  if (useAuth.getState().sync !== 'saved') throw new Error('Save the workspace before uploading files');
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(new Error('Cannot read file'));
+    reader.readAsDataURL(blob);
+  });
+  await api(`/api/blobs/${encodeURIComponent(id)}`, 'PUT', { base64 });
 }

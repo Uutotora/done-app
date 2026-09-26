@@ -34,6 +34,8 @@ import { Avatar, Field, PageIcon, Segmented, Switch, TextInput } from '@/compone
 import { Dialog, Popover } from '@/components/ui/Overlay';
 import { IconPicker } from '@/components/pickers/IconPicker';
 import { OptionList } from '@/components/pickers/OptionList';
+import { PasswordSettings } from '@/components/AccountStatus';
+import { useAuth, isAdmin } from '@/lib/auth';
 import { PlaneLogo } from '@/components/PlanePanel';
 
 type Tab = 'account' | 'workspace' | 'members' | 'appearance' | 'plane' | 'data';
@@ -49,17 +51,20 @@ const TABS: { key: Tab; label: TKey; icon: ReactNode }[] = [
 export default function Settings() {
   const t = useT();
   const { tab } = useParams();
-  const active: Tab = TABS.some((x) => x.key === tab) ? (tab as Tab) : 'account';
+  const auth = useAuth();
+  const canManage = auth.mode === 'local' || isAdmin(auth.user);
+  const availableTabs = TABS.filter((x) => canManage || ['account', 'appearance'].includes(x.key));
+  const active: Tab = availableTabs.some((x) => x.key === tab) ? (tab as Tab) : 'account';
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Topbar crumbs={[{ label: t('settings.title'), icon: '⚙️' }]} />
-      <div className="flex min-h-0 flex-1">
-        <nav className="w-[240px] shrink-0 overflow-y-auto border-r border-line px-3 py-6">
-          <div className="mb-2 px-2 text-[12px] font-medium text-fg-3">{t('settings.title')}</div>
-          {TABS.map((x) => (
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <nav className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-3 md:block md:w-[200px] md:overflow-y-auto md:border-r md:py-6">
+          <div className="mb-2 hidden px-2 text-[12px] font-medium text-fg-3">{t('settings.title')}</div>
+          {availableTabs.map((x) => (
             <NavLink
               key={x.key}
-              to={`/settings/${x.key}`}
+              to={x.key === 'members' && auth.mode === 'signedIn' ? '/admin' : `/settings/${x.key}`}
               className={cn(
                 'flex h-[30px] items-center gap-2 rounded-md px-2 text-[14px] transition-colors',
                 active === x.key ? 'bg-active font-medium text-fg' : 'text-fg-2 hover:bg-hover',
@@ -78,7 +83,7 @@ export default function Settings() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="mx-auto max-w-[720px] px-10 pb-24 pt-10"
+              className="mx-auto max-w-[720px] px-5 sm:px-10 pb-24 pt-10"
             >
               {active === 'account' && <Account />}
               {active === 'workspace' && <WorkspaceTab />}
@@ -153,6 +158,7 @@ function Account() {
           </Field>
         </div>
       </div>
+      <PasswordSettings />
       <Field label={t('settings.role')}>
         <TextInput
           defaultValue={me.role}

@@ -1,11 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Copy, FileText, FolderInput, ImageIcon, Link2, MessageSquare, MoreHorizontal, Plus, SmilePlus, Trash2 } from 'lucide-react';
+import { Copy, FileText, FolderInput, Link2, MessageSquare, MoreHorizontal, Plus, SmilePlus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useData } from '@/lib/store';
 import { toast } from '@/lib/ui';
 import { useLang, useT } from '@/lib/i18n';
-import { GRADIENTS } from '@/lib/constants';
 import { timeAgo } from '@/lib/dates';
 import { deleteDocWithUndo } from '@/lib/actions';
 import { useProjectsList } from '@/lib/selectors';
@@ -17,7 +16,7 @@ import { Comments } from '@/components/Comments';
 import { AutoTextarea, PageIcon, Switch } from '@/components/ui/bits';
 import { IconButton } from '@/components/ui/Button';
 import { EntriesMenu, Popover, type MenuEntry } from '@/components/ui/Overlay';
-import { CoverPicker, IconPicker } from '@/components/pickers/IconPicker';
+import { IconPicker } from '@/components/pickers/IconPicker';
 import { NotFound } from './NotFound';
 
 export default function DocPage() {
@@ -84,26 +83,8 @@ function DocView({ doc }: { doc: Doc }) {
         }
       />
 
-      {/* Cover */}
-      {doc.cover && (
-        <div className="group relative h-[30vh] max-h-[280px] min-h-[160px] w-full shrink-0" style={{ background: doc.cover.value }}>
-          <div
-            className={cn(
-              'absolute bottom-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100',
-              doc.fullWidth ? 'right-6' : 'right-[max(24px,calc(50%-354px))]',
-            )}
-          >
-            <CoverPicker value={doc.cover} onChange={(c) => set({ cover: c })}>
-              <button className="rounded-md bg-white/85 px-2.5 py-1 text-[12.5px] font-medium text-[#37352f] shadow-sm backdrop-blur hover:bg-white">
-                {t('docs.changeCover')}
-              </button>
-            </CoverPicker>
-          </div>
-        </div>
-      )}
-
       <div className={cn('group/header pb-40', doc.fullWidth ? 'full-width' : 'page-width')}>
-        <div className={cn('relative z-10', doc.cover ? (doc.icon ? '-mt-[42px]' : 'mt-6') : doc.icon ? 'mt-20' : 'mt-24')}>
+        <div className="relative z-10 mt-10">
           {doc.icon && (
             <IconPicker value={doc.icon} onChange={(v) => set({ icon: v })} open={iconOpen} onOpenChange={setIconOpen}>
               <motion.button
@@ -117,20 +98,12 @@ function DocView({ doc }: { doc: Doc }) {
           )}
         </div>
 
-        {/* Hover actions like Notion: add icon, add cover, add comment */}
-        <div className="flex h-9 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/header:opacity-100 has-[[data-state=open]]:opacity-100">
+        {/* Hover actions like Notion: add icon and add comment */}
+        <div className="flex h-9 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/header:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
           {!doc.icon && (
             <IconPicker value={doc.icon} onChange={(v) => set({ icon: v })}>
               <HeaderAction icon={<SmilePlus size={15} />}>{t('docs.addIcon')}</HeaderAction>
             </IconPicker>
-          )}
-          {!doc.cover && (
-            <HeaderAction
-              icon={<ImageIcon size={15} />}
-              onClick={() => set({ cover: { kind: 'gradient', value: GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)] } })}
-            >
-              {t('docs.addCover')}
-            </HeaderAction>
           )}
           {!showComments && (
             <HeaderAction icon={<MessageSquare size={15} />} onClick={() => setShowComments(true)}>

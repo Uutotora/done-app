@@ -7,7 +7,7 @@ import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { dateLocale, useLang, useT } from '@/lib/i18n';
 import { isClosed, progressOf, refPath, refTitle, useMe, useProjectsList } from '@/lib/selectors';
-import { daysFromToday, formatShortDate, timeAgo, todayISO } from '@/lib/dates';
+import { daysFromToday, formatShortDate, timeAgo, todayISO, toISODate } from '@/lib/dates';
 import { PROJECT_STATUS_COLOR } from '@/lib/constants';
 import { setItemStatus } from '@/lib/actions';
 import { Topbar } from '@/components/Topbar';
@@ -16,12 +16,13 @@ import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 import { NodeIcon } from '@/components/files/NodeIcon';
 import { useOpenFileNode } from '@/views/Files';
 import { cn } from '@/lib/utils';
+import { WorkspacePulse } from '@/components/ProjectHealth';
 import type { Item, Person } from '@/lib/types';
 
 const fadeUp = (i: number) => ({
-  initial: { opacity: 0, y: 10 },
+  initial: { opacity: 0, y: 4 },
   animate: { opacity: 1, y: 0 },
-  transition: { delay: 0.04 * i, duration: 0.4, ease: [0.16, 1, 0.3, 1] as const },
+  transition: { delay: 0.015 * i, duration: 0.2, ease: [0.16, 1, 0.3, 1] as const },
 });
 
 export function Home() {
@@ -65,7 +66,7 @@ export function Home() {
   const doneToday = useMemo(
     () =>
       Object.values(items).filter(
-        (i) => i.assigneeId === me?.id && i.status === 'done' && i.completedAt?.slice(0, 10) === new Date().toISOString().slice(0, 10),
+        (i) => i.assigneeId === me?.id && i.status === 'done' && i.completedAt && toISODate(new Date(i.completedAt)) === todayISO(),
       ),
     [items, me?.id],
   );
@@ -82,7 +83,7 @@ export function Home() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Topbar crumbs={[{ label: t('nav.home'), icon: '🏠' }]} />
-      <div className="mx-auto w-full max-w-[1080px] px-10 pb-24 pt-10">
+      <div className="mx-auto w-full max-w-[1180px] px-5 sm:px-10 pb-24 pt-10">
         <motion.div {...fadeUp(0)}>
           <div className="text-[13.5px] font-medium text-fg-3 first-letter:uppercase">
             {format(new Date(), 'EEEE, d MMMM', { locale: dateLocale(lang) })}
@@ -93,23 +94,44 @@ export function Home() {
           </h1>
         </motion.div>
 
+        <div className="mt-6">
+          <WorkspacePulse />
+        </div>
+
         {/* Quick actions */}
         <motion.div {...fadeUp(1)} className="mt-6 grid grid-cols-2 gap-2 md:grid-cols-4">
           <QuickAction icon={<Plus size={18} />} color="blue" label={t('home.quick.item')} hint="C" onClick={() => openCreateItem()} />
           <QuickAction icon={<Link2 size={18} />} color="purple" label={t('home.quick.link')} onClick={() => openLinkDialog()} />
-          <QuickAction icon={<FilePlus size={18} />} color="green" label={t('home.quick.doc')} onClick={() => navigate(`/docs/${createDoc({})}`)} />
+          <QuickAction
+            icon={<FilePlus size={18} />}
+            color="green"
+            label={t('home.quick.doc')}
+            onClick={() => {
+              const id = createDoc({});
+              if (id) navigate(`/docs/${id}`);
+            }}
+          />
           <QuickAction
             icon={<FolderPlus size={18} />}
             color="orange"
             label={t('home.quick.project')}
-            onClick={() => navigate(`/p/${createProject({ name: '' })}/overview`)}
+            onClick={() => {
+              const id = createProject({ name: '' });
+              if (id) navigate(`/p/${id}/overview`);
+            }}
           />
         </motion.div>
 
         <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_320px]">
           {/* Focus */}
           <motion.section {...fadeUp(2)}>
-            <SectionTitle action={doneToday.length > 0 && <span className="text-[12.5px] text-[var(--c-green-text)]">✓ {doneToday.length}</span>}>
+            <SectionTitle
+              action={
+                <Link to="/my-work" className="text-[13px] text-fg-3 hover:text-fg">
+                  {t('nav.myWork')} → {doneToday.length > 0 && `✓ ${doneToday.length}`}
+                </Link>
+              }
+            >
               {t('home.focus')}
             </SectionTitle>
             <div className="overflow-hidden rounded-xl border border-line">
@@ -173,14 +195,13 @@ export function Home() {
               const prog = progressOf(pi);
               const team = [...new Set(pi.map((it) => it.assigneeId).filter(Boolean))].map((id) => people[id!]).filter(Boolean) as Person[];
               return (
-                <motion.div key={p.id} {...fadeUp(5 + i)} whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }}>
+                <motion.div key={p.id} {...fadeUp(Math.min(5 + i, 8))}>
                   <Link
                     to={`/p/${p.id}/overview`}
-                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-shadow hover:shadow-md"
+                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-colors hover:border-line-strong hover:bg-subtle"
                   >
-                    <div className="h-16" style={{ background: p.cover?.value ?? 'var(--bg-hover)' }} />
-                    <div className="relative px-4 pb-4">
-                      <div className="-mt-5 mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-bg text-[24px] shadow-sm">
+                    <div className="relative p-4">
+                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-subtle text-[24px]">
                         <PageIcon icon={p.icon} size={26} />
                       </div>
                       <div className="flex items-center justify-between gap-2">
@@ -260,21 +281,14 @@ export function Home() {
               {recent.slice(0, 8).map((r) => {
                 const info = refTitle(r);
                 if (!info) return null;
-                const cover =
-                  r.kind === 'project'
-                    ? projectsById[r.id]?.cover?.value
-                    : r.kind === 'doc'
-                      ? useData.getState().docs[r.id]?.cover?.value
-                      : 'linear-gradient(135deg, var(--c-purple-bg), var(--c-blue-bg))';
                 return (
                   <Link
                     key={`${r.kind}:${r.id}`}
                     to={refPath(r)}
-                    className="group w-[150px] shrink-0 overflow-hidden rounded-xl border border-line bg-bg transition-all hover:-translate-y-0.5 hover:shadow-md"
+                    className="group w-[170px] shrink-0 rounded-lg border border-line bg-bg transition-colors hover:bg-subtle"
                   >
-                    <div className="h-12" style={{ background: cover ?? 'var(--bg-hover)' }} />
-                    <div className="px-3 pb-3">
-                      <div className="-mt-4 mb-1.5">
+                    <div className="p-3">
+                      <div className="mb-2">
                         <PageIcon icon={info.icon} size={28} />
                       </div>
                       <div className="line-clamp-2 text-[13.5px] font-medium leading-snug">{info.title || t('common.untitled')}</div>
@@ -297,13 +311,13 @@ function QuickAction({ icon, label, onClick, color, hint }: { icon: ReactNode; l
       whileTap={{ scale: 0.98 }}
       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
       onClick={onClick}
-      className="flex h-[52px] items-center gap-3 rounded-xl border border-line px-3.5 text-left text-[14px] font-medium transition-shadow hover:shadow-sm"
+      className="flex h-[52px] items-center gap-2 rounded-lg border border-line px-2.5 text-left text-[13px] font-medium transition-shadow sm:gap-3 sm:px-3.5 sm:text-[14px] hover:shadow-sm"
     >
-      <span data-color={color} className="tint flex h-8 w-8 items-center justify-center rounded-lg">
+      <span data-color={color} className="tint flex h-7 w-7 shrink-0 items-center justify-center rounded-md sm:h-8 sm:w-8">
         {icon}
       </span>
       <span className="flex-1 truncate">{label}</span>
-      {hint && <span className="text-[12px] text-fg-4">{hint}</span>}
+      {hint && <span className="hidden text-[12px] text-fg-4 sm:inline">{hint}</span>}
     </motion.button>
   );
 }

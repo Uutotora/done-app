@@ -57,15 +57,12 @@ export function SyncNotice() {
   const { mode, sync, syncError, user } = useAuth();
   const ru = useLang() === 'ru';
   if (mode !== 'signedIn') return null;
-  if (sync === 'error' || sync === 'conflict')
+  if (sync === 'error')
     return (
       <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-[var(--c-orange-bg)] px-4 py-2 text-[12px]">
         <span className="flex-1">
-          {sync === 'conflict'
-            ? ru
-              ? 'Другой участник изменил пространство. Скачайте свои изменения перед загрузкой новой версии.'
-              : 'Another member changed the workspace. Download your changes before loading the latest version.'
-            : syncError}
+          {ru ? 'Не удалось сохранить изменения: ' : 'Could not save changes: '}
+          {syncError}
         </span>
         <Button
           size="xs"
@@ -78,11 +75,9 @@ export function SyncNotice() {
         >
           {ru ? 'Скачать изменения' : 'Download changes'}
         </Button>
-        {sync === 'error' && (
-          <Button size="xs" onClick={() => void flushWorkspace()}>
-            {ru ? 'Повторить' : 'Retry'}
-          </Button>
-        )}
+        <Button size="xs" onClick={() => void flushWorkspace()}>
+          {ru ? 'Повторить' : 'Retry'}
+        </Button>
         <Button
           size="xs"
           onClick={() => {
@@ -93,7 +88,7 @@ export function SyncNotice() {
                   : 'Load the server version? Unsaved changes will be replaced. Download them first.',
               )
             )
-              void refreshWorkspace().catch((e) => toast({ message: e.message, tone: 'error' }));
+              void refreshWorkspace(true).catch((e) => toast({ message: e.message, tone: 'error' }));
           }}
         >
           {ru ? 'Загрузить версию сервера' : 'Load server version'}

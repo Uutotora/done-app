@@ -24,14 +24,14 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await expect(page.getByRole('heading', { name: /Мария/ })).toBeVisible();
   await page.getByRole('main').getByRole('button', { name: 'Новый проект', exact: true }).click();
   await page.getByPlaceholder('Новый проект', { exact: true }).fill('Запуск продукта');
-  const savedProject = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PUT' && r.status() === 200);
+  const savedProject = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
   await page.getByPlaceholder('Новый проект', { exact: true }).press('Tab');
   await savedProject;
   await page.reload();
   await expect(page.getByPlaceholder('Новый проект', { exact: true })).toHaveValue('Запуск продукта');
   await page.keyboard.press('c');
   await page.getByPlaceholder('Что нужно сделать?').fill('Проверить сохранение');
-  const savedTask = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PUT' && r.status() === 200);
+  const savedTask = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
   await page.getByPlaceholder('Что нужно сделать?').press('Enter');
   await savedTask;
   await page.getByRole('link', { name: 'Мои задачи', exact: true }).click();

@@ -4,6 +4,7 @@ import { Outlet, useLocation, useMatch } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { useHotkey, useIsDark } from '@/lib/hooks';
+import { reportPresence } from '@/lib/auth';
 import { SyncNotice } from './AccountStatus';
 import { Sidebar } from './Sidebar';
 import { Toaster } from './Toaster';
@@ -20,6 +21,8 @@ export function AppShell() {
   const t = useT();
   useEffect(() => {
     useUI.getState().openPeek(undefined);
+    const timer = setTimeout(() => reportPresence(location.pathname), 300);
+    return () => clearTimeout(timer);
   }, [location.pathname]);
   const setPrefs = useData((s) => s.setPrefs);
   const isDark = useIsDark();

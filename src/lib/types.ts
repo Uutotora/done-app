@@ -111,6 +111,10 @@ export interface Item {
   parentId?: ID;
   /** Tasks that must finish before this item can start. */
   dependsOn?: ID[];
+  /** Sprint of the item's project the work is planned into. */
+  sprintId?: ID;
+  /** Person who created the item; gets updates about it in the inbox. */
+  createdBy?: ID;
   order: number;
   content?: unknown[];
   plane?: PlaneIssueRef;
@@ -133,8 +137,45 @@ export interface Doc {
   smallText?: boolean;
   font?: DocFont;
   order: number;
+  createdBy?: ID;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+}
+
+export type SprintStatus = 'planned' | 'active' | 'completed';
+
+/** A time-boxed iteration of one project, like Notion sprints. */
+export interface Sprint {
+  id: ID;
+  projectId: ID;
+  name: string;
+  goal?: string;
+  startDate: ISODate;
+  endDate: ISODate;
+  status: SprintStatus;
+  /** Number of items in the sprint when it was completed, for velocity. */
+  completedCount?: number;
+  completedAt?: ISODateTime;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export type NotificationKind = 'assigned' | 'mention' | 'comment' | 'status' | 'sprint';
+
+/** One entry of a person's inbox. */
+export interface AppNotification {
+  id: ID;
+  recipientId: ID;
+  actorId: ID;
+  kind: NotificationKind;
+  targetKind: 'item' | 'doc' | 'project';
+  targetId: ID;
+  projectId?: ID;
+  /** Comment excerpt, new status or sprint name, depending on the kind. */
+  text?: string;
+  createdAt: ISODateTime;
+  readAt?: ISODateTime;
+  archivedAt?: ISODateTime;
 }
 
 export type FileNodeKind = 'folder' | 'file' | 'link';
@@ -243,6 +284,8 @@ export interface Comment {
   targetId: ID;
   authorId: ID;
   text: string;
+  /** People mentioned with @ in the text. */
+  mentions?: ID[];
   createdAt: ISODateTime;
   editedAt?: ISODateTime;
 }
@@ -259,7 +302,7 @@ export interface Activity {
   at: ISODateTime;
 }
 
-export type TrashKind = 'project' | 'item' | 'doc' | 'file' | 'group';
+export type TrashKind = 'project' | 'item' | 'doc' | 'file' | 'group' | 'sprint';
 
 export interface TrashEntry {
   id: ID;
@@ -304,7 +347,9 @@ export interface DataState {
   docs: Record<ID, Doc>;
   files: Record<ID, FileNode>;
   maps: Record<ID, ProjectMap>;
+  sprints: Record<ID, Sprint>;
   comments: Record<ID, Comment>;
+  notifications: Record<ID, AppNotification>;
   activity: Activity[];
   trash: TrashEntry[];
   plane: { config: PlaneConfig; snapshots: Record<ID, PlaneSnapshot> };

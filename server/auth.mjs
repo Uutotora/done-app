@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, scrypt, createHash, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { canReadProject, canWriteProject, isAdmin, mergeState, sharedState, validateState, visibleState } from './access.mjs';
+import { applyChanges, canReadProject, canWriteProject, isAdmin, mergeState, sharedState, validateState, visibleState } from './access.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -35,6 +35,56 @@ export function createAuthApi({
   const attempts = new Map();
   const audit = (user, action, detail = '') =>
     db.prepare('INSERT INTO audit(actor,action,detail,at) VALUES(?,?,?,?)').run(user, action, detail, new Date().toISOString());
+  // Live updates: every signed-in tab keeps one Server-Sent Events stream open.
+  const streams = new Set();
+  const presence = new Map();
+  const emit = (stream, event, data) => {
+    try {
+      stream.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      /* the socket is closing */
+    }
+  };
+  const projectOfPath = (path, state) => {
+    const [, section, id] = /^\/(p|items|docs)\/([^/?#]+)/.exec(path) ?? [];
+    if (!section) return { scoped: false };
+    if (section === 'p') return { scoped: true, projectId: id };
+    const entity = section === 'items' ? state?.items?.[id] : state?.docs?.[id];
+    return { scoped: true, projectId: entity?.projectId, missing: !entity };
+  };
+  const peersFor = (viewer) => {
+    const state = readWorkspace()?.data;
+    const online = new Map();
+    for (const stream of streams) online.set(stream.user.id, stream.user);
+    return [...online.values()].map((peer) => {
+      const path = presence.get(peer.id)?.path ?? '';
+      const { scoped, projectId, missing } = projectOfPath(path, state);
+      const readable = !scoped || (!missing && (projectId ? canReadProject(viewer, projectId) : canReadProject(viewer, undefined)));
+      return { id: peer.id, name: peer.name, path: readable ? path : '', at: presence.get(peer.id)?.at ?? 0 };
+    });
+  };
+  const broadcastPresence = () => {
+    for (const stream of streams) emit(stream, 'presence', { peers: peersFor(stream.user) });
+  };
+  const broadcastRevision = (revision, actorId, tab) => {
+    for (const stream of streams) emit(stream, 'revision', { revision, actorId, tab });
+  };
+  const closeStreams = (userId) => {
+    for (const stream of [...streams]) if (stream.user.id === userId) stream.res.end();
+  };
+  const heartbeat = setInterval(() => {
+    for (const stream of streams) {
+      try {
+        stream.res.write(': ping\n\n');
+      } catch {
+        /* ignore */
+      }
+    }
+    // Drop locations nobody refreshed for a while (tab in background, laptop asleep).
+    const stale = Date.now() - 120000;
+    for (const [id, entry] of presence) if (entry.at < stale) presence.delete(id);
+  }, 25000);
+  heartbeat.unref?.();
   const readWorkspace = () => {
     const row = db.prepare('SELECT * FROM workspace WHERE id=1').get();
     return row ? { data: JSON.parse(row.data), revision: row.revision } : null;
@@ -88,7 +138,12 @@ export function createAuthApi({
   }
   async function handler(req, res, next) {
     const path = new URL(req.url || '/', 'http://localhost').pathname;
-    if (!path.startsWith('/api/auth/') && !path.startsWith('/api/admin/') && path !== '/api/workspace' && !path.startsWith('/api/blobs/')) {
+    if (
+      !path.startsWith('/api/auth/') &&
+      !path.startsWith('/api/admin/') &&
+      !['/api/workspace', '/api/events', '/api/presence'].includes(path) &&
+      !path.startsWith('/api/blobs/')
+    ) {
       next?.();
       return false;
     }
@@ -168,6 +223,7 @@ export function createAuthApi({
           }
           user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
           audit(id, 'account.created', email);
+          if (!setup) broadcastRevision(readWorkspace().revision, id);
         }
         startSession(user, res);
         return send(res, 200, { user });
@@ -176,6 +232,7 @@ export function createAuthApi({
       if (path === '/api/auth/logout' && req.method === 'POST') {
         db.prepare('DELETE FROM sessions WHERE token=?').run(hash(sessionToken(req) || ''));
         res.setHeader('Set-Cookie', cookie('', 0));
+        closeStreams(user.id);
         return send(res, 200, { ok: true });
       }
       if (path === '/api/auth/password' && req.method === 'POST') {
@@ -199,17 +256,54 @@ export function createAuthApi({
         audit(user.id, 'password.changed');
         return send(res, 200, { ok: true });
       }
+      if (path === '/api/events' && req.method === 'GET') {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store, no-transform',
+          connection: 'keep-alive',
+          'x-accel-buffering': 'no',
+        });
+        res.write('retry: 3000\n\n');
+        const stream = { res, user };
+        streams.add(stream);
+        emit(stream, 'revision', { revision: readWorkspace()?.revision ?? 0 });
+        broadcastPresence();
+        req.on('close', () => {
+          streams.delete(stream);
+          if (![...streams].some((s) => s.user.id === user.id)) presence.delete(user.id);
+          broadcastPresence();
+        });
+        return true;
+      }
+      if (path === '/api/presence' && req.method === 'POST') {
+        const input = await authenticatedBody(req, 4096);
+        const location = typeof input.path === 'string' && input.path.startsWith('/') ? input.path.slice(0, 200) : '';
+        const previous = presence.get(user.id);
+        presence.set(user.id, { path: location, at: Date.now() });
+        if (previous?.path !== location) broadcastPresence();
+        return send(res, 200, { ok: true });
+      }
       if (path === '/api/workspace') {
         if (req.method === 'PUT' && user.role === 'viewer') fail(403, 'Read-only access');
         let workspace = readWorkspace();
         if (req.method === 'GET') return send(res, 200, { data: visibleState(workspace.data, user), revision: workspace.revision, user });
-        if (req.method === 'PUT') {
+        if (req.method === 'PUT' || req.method === 'PATCH') {
           const input = await authenticatedBody(req);
           workspace = readWorkspace();
-          if (input.revision !== workspace.revision) fail(409, 'Workspace changed. Reload before saving.');
-          const merged = mergeState(workspace.data, sharedState(input.data), user);
+          let merged;
+          if (req.method === 'PUT') {
+            // Full snapshots can only be saved on top of the revision they were loaded from.
+            if (input.revision !== workspace.revision) fail(409, 'Workspace changed. Reload before saving.');
+            merged = mergeState(workspace.data, sharedState(input.data), user);
+          } else {
+            // Change sets merge field by field, so concurrent edits by teammates are kept.
+            merged = applyChanges(workspace.data, input.changes, user);
+          }
           db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
-          return send(res, 200, { revision: workspace.revision + 1 });
+          const revision = workspace.revision + 1;
+          const tab = typeof req.headers['x-done-tab'] === 'string' ? req.headers['x-done-tab'].slice(0, 64) : undefined;
+          broadcastRevision(revision, user.id, tab);
+          return send(res, 200, { revision });
         }
       }
       if (path.startsWith('/api/blobs/')) {
@@ -291,6 +385,7 @@ export function createAuthApi({
             id,
           );
           db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+          closeStreams(id);
           audit(user.id, 'member.updated', `${target.email} · ${role}`);
           return send(res, 200, { ok: true });
         }
@@ -302,5 +397,14 @@ export function createAuthApi({
     }
     return true;
   }
-  return { handler, authenticate, close: () => db.close() };
+  return {
+    handler,
+    authenticate,
+    close: () => {
+      clearInterval(heartbeat);
+      for (const stream of streams) stream.res.end();
+      streams.clear();
+      db.close();
+    },
+  };
 }

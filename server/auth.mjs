@@ -3,21 +3,46 @@ import { randomBytes, randomUUID, scrypt, createHash, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { applyChanges, canReadProject, canWriteProject, isAdmin, mergeState, sharedState, validateState, visibleState } from './access.mjs';
+import {
+  applyChanges,
+  canReadProject,
+  canWriteProject,
+  isAdmin,
+  mergeState,
+  normalizeRole,
+  projectLevel,
+  sharedState,
+  validateState,
+  visibleState,
+} from './access.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
   throw Object.assign(new Error(message), { status });
+};
+const parse = (value, fallback) => {
+  try {
+    return value == null ? fallback : JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 };
 const publicUser = (row) =>
   row && {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: row.role,
-    projectIds: row.project_ids === null ? null : JSON.parse(row.project_ids),
+    role: normalizeRole(row.role),
+    projectIds: row.project_ids === null ? null : parse(row.project_ids, []),
+    projectRoles: parse(row.project_roles, {}),
+    canCreateProjects: row.can_create_projects === undefined ? true : !!row.can_create_projects,
     disabled: !!row.disabled,
+    createdAt: row.created_at,
+    lastSeen: row.last_seen ?? null,
   };
+const ROLE_INPUT = ['owner', 'admin', 'editor', 'viewer'];
+const PERSON_COLORS = ['blue', 'purple', 'green', 'orange', 'pink', 'yellow', 'red', 'brown'];
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function createAuthApi({
   filename = process.env.DONE_DB_PATH || resolve('.data/done.sqlite'),
@@ -32,6 +57,23 @@ export function createAuthApi({
     CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, revision INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS blobs (id TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL);`);
+  // Columns added after the first release; older databases are upgraded in place.
+  const addColumn = (table, name, definition) => {
+    if (
+      !db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .some((c) => c.name === name)
+    )
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  };
+  addColumn('users', 'project_roles', "TEXT NOT NULL DEFAULT '{}'");
+  addColumn('users', 'can_create_projects', 'INTEGER NOT NULL DEFAULT 1');
+  addColumn('users', 'last_seen', 'INTEGER');
+  addColumn('invites', 'project_roles', "TEXT NOT NULL DEFAULT '{}'");
+  addColumn('invites', 'can_create_projects', 'INTEGER NOT NULL DEFAULT 1');
+  addColumn('invites', 'created_at', 'INTEGER');
+  db.exec("UPDATE users SET role='editor' WHERE role='member'; UPDATE invites SET role='editor' WHERE role='member';");
   const attempts = new Map();
   const audit = (user, action, detail = '') =>
     db.prepare('INSERT INTO audit(actor,action,detail,at) VALUES(?,?,?,?)').run(user, action, detail, new Date().toISOString());
@@ -112,16 +154,23 @@ export function createAuthApi({
   };
   const cookie = (token, age) => `done_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure ? '; Secure' : ''}`;
   const sessionToken = (req) => /(?:^|;\s*)done_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+  const seen = new Map();
   const authenticate = (req) => {
     const token = sessionToken(req);
     if (!token) return null;
-    return publicUser(
+    const user = publicUser(
       db
         .prepare(
           'SELECT users.* FROM users JOIN sessions ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>? AND users.disabled=0',
         )
         .get(hash(token), Date.now()),
     );
+    // "Last active" for the people list, written at most once a minute per member.
+    if (user && Date.now() - (seen.get(user.id) ?? 0) > 60000) {
+      seen.set(user.id, Date.now());
+      db.prepare('UPDATE users SET last_seen=? WHERE id=?').run(Date.now(), user.id);
+    }
+    return user;
   };
   const startSession = (user, res) => {
     db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now());
@@ -152,6 +201,28 @@ export function createAuthApi({
     if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !readWorkspace()?.data.projects[v])) fail(400, 'Invalid project access');
     return JSON.stringify([...new Set(value)]);
   };
+  const LEVEL_INPUT = ['viewer', 'commenter', 'editor'];
+  const levelsInput = (value) => {
+    if (value === null || value === undefined) return '{}';
+    if (typeof value !== 'object' || Array.isArray(value)) fail(400, 'Invalid project access');
+    const projects = readWorkspace()?.data.projects ?? {};
+    const out = {};
+    for (const [id, level] of Object.entries(value)) {
+      if (!projects[id] || !LEVEL_INPUT.includes(level)) fail(400, 'Invalid project access');
+      out[id] = level;
+    }
+    return JSON.stringify(out);
+  };
+  /** Who may give a role: owners give any role, administrators only editor and viewer. */
+  const canAssignRole = (actor, role) => ROLE_INPUT.includes(role) && (actor.role === 'owner' || ['editor', 'viewer'].includes(role));
+  /** Who may manage an account: owners manage everyone but themselves, administrators manage editors and viewers. */
+  const canManage = (actor, target) =>
+    target.id !== actor.id && (actor.role === 'owner' || (actor.role === 'admin' && ['editor', 'viewer'].includes(target.role)));
+  const activeOwners = () => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='owner' AND disabled=0").get().n;
+  /** Tells a member's open tabs to reload their access right away. */
+  const notifyAccess = (userId) => {
+    for (const stream of streams) if (stream.user.id === userId) emit(stream, 'access', { at: Date.now() });
+  };
   async function authenticatedBody(req, limit) {
     const input = await body(req, limit);
     if (!authenticate(req)) fail(401, 'Sign in to continue');
@@ -162,6 +233,7 @@ export function createAuthApi({
     if (
       !path.startsWith('/api/auth/') &&
       !path.startsWith('/api/admin/') &&
+      !path.startsWith('/api/projects/') &&
       !['/api/workspace', '/api/events', '/api/presence'].includes(path) &&
       !path.startsWith('/api/blobs/')
     ) {
@@ -222,16 +294,21 @@ export function createAuthApi({
           const id = randomUUID();
           let data = setup ? sharedState(input.data) : readWorkspace().data;
           validateState(data);
-          data.people[id] = { id, name, email, color: 'blue' };
+          const color = PERSON_COLORS[Object.keys(data.people).length % PERSON_COLORS.length];
+          data.people[id] = { id, name, email, color: setup ? 'blue' : color };
           db.exec('BEGIN IMMEDIATE');
           try {
-            db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?,0,?)').run(
+            db.prepare(
+              'INSERT INTO users(id,email,name,password,role,project_ids,project_roles,can_create_projects,disabled,created_at) VALUES(?,?,?,?,?,?,?,?,0,?)',
+            ).run(
               id,
               email,
               name,
               encoded,
-              setup ? 'owner' : invite.role,
+              setup ? 'owner' : normalizeRole(invite.role),
               setup ? null : invite.project_ids,
+              setup ? '{}' : (invite.project_roles ?? '{}'),
+              setup ? 1 : (invite.can_create_projects ?? 1),
               new Date().toISOString(),
             );
             if (setup) db.prepare('INSERT INTO workspace VALUES(1,?,1)').run(JSON.stringify(data));
@@ -305,7 +382,7 @@ export function createAuthApi({
         return send(res, 200, { ok: true });
       }
       if (path === '/api/workspace') {
-        if (req.method === 'PUT' && user.role === 'viewer') fail(403, 'Read-only access');
+        if (req.method === 'PUT' && normalizeRole(user.role) === 'viewer') fail(403, 'Read-only access');
         let workspace = readWorkspace();
         if (req.method === 'GET') return send(res, 200, { data: visibleState(workspace.data, user), revision: workspace.revision, user });
         if (req.method === 'PUT' || req.method === 'PATCH') {
@@ -318,13 +395,63 @@ export function createAuthApi({
             merged = mergeState(workspace.data, sharedState(input.data), user);
           } else {
             // Change sets merge field by field, so concurrent edits by teammates are kept.
-            merged = applyChanges(workspace.data, input.changes, user);
+            const info = {};
+            merged = applyChanges(workspace.data, input.changes, user, info);
+            // Someone limited to some projects keeps access to the projects they create.
+            if (info.createdProjects?.size && user.projectIds !== null && !isAdmin(user)) {
+              const ids = [...new Set([...user.projectIds, ...info.createdProjects])];
+              db.prepare('UPDATE users SET project_ids=? WHERE id=?').run(JSON.stringify(ids), user.id);
+              for (const pid of info.createdProjects) audit(user.id, 'project.created', merged.projects[pid]?.name ?? pid);
+            }
           }
           db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
           const revision = workspace.revision + 1;
           const tab = typeof req.headers['x-done-tab'] === 'string' ? req.headers['x-done-tab'].slice(0, 64) : undefined;
           broadcastRevision(revision, user.id, tab);
           return send(res, 200, { revision });
+        }
+      }
+      if (path.startsWith('/api/projects/') && path.endsWith('/access')) {
+        const projectId = decodeURIComponent(path.split('/')[3] ?? '');
+        const project = readWorkspace()?.data.projects[projectId];
+        if (!project || !canReadProject(user, projectId)) fail(404, 'Project not found');
+        const rows = db.prepare('SELECT * FROM users WHERE disabled=0 ORDER BY created_at').all().map(publicUser);
+        const listAccess = () =>
+          rows
+            .map((m) => ({ id: m.id, name: m.name, role: m.role, level: projectLevel(m, projectId), allProjects: m.projectIds === null }))
+            .filter((m) => m.level);
+        if (req.method === 'GET') return send(res, 200, { members: listAccess() });
+        if (req.method === 'PUT') {
+          if (!isAdmin(user)) fail(403, 'Administrator access required');
+          const input = await authenticatedBody(req);
+          const target = rows.find((m) => m.id === input.userId);
+          if (!target) fail(404, 'Member not found');
+          if (isAdmin(target)) fail(400, 'Administrators have access to every project');
+          if (!canManage(user, target)) fail(403, 'Cannot change this account');
+          const level = input.level ?? null;
+          if (level !== null && !LEVEL_INPUT.includes(level)) fail(400, 'Invalid access level');
+          if (level === 'editor' && target.role === 'viewer') fail(400, 'Viewers cannot edit');
+          const roles = { ...target.projectRoles };
+          let ids = target.projectIds;
+          if (level === null) {
+            if (ids === null) fail(400, 'This member has access to all projects');
+            ids = ids.filter((id) => id !== projectId);
+            delete roles[projectId];
+          } else {
+            if (ids !== null && !ids.includes(projectId)) ids = [...ids, projectId];
+            if (level === (target.role === 'viewer' ? 'viewer' : 'editor')) delete roles[projectId];
+            else roles[projectId] = level;
+          }
+          db.prepare('UPDATE users SET project_ids=?,project_roles=? WHERE id=?').run(
+            ids === null ? null : JSON.stringify(ids),
+            JSON.stringify(roles),
+            target.id,
+          );
+          audit(user.id, 'project.access', `${target.email} · ${project.name} · ${level ?? 'removed'}`);
+          notifyAccess(target.id);
+          const refreshed = db.prepare('SELECT * FROM users WHERE id=?').get(target.id);
+          rows.splice(rows.indexOf(target), 1, publicUser(refreshed));
+          return send(res, 200, { members: listAccess() });
         }
       }
       if (path.startsWith('/api/blobs/')) {
@@ -360,28 +487,60 @@ export function createAuthApi({
         if (path === '/api/admin/members' && req.method === 'GET')
           return send(res, 200, {
             members: db.prepare('SELECT * FROM users ORDER BY created_at').all().map(publicUser),
-            invites: db.prepare('SELECT email,role,expires FROM invites WHERE expires>?').all(Date.now()),
+            invites: db
+              .prepare(
+                'SELECT invites.email,invites.role,invites.project_ids,invites.project_roles,invites.can_create_projects,invites.expires,invites.created_at,users.name AS invited_by FROM invites LEFT JOIN users ON users.id=invites.created_by WHERE invites.expires>? ORDER BY invites.created_at DESC',
+              )
+              .all(Date.now())
+              .map((i) => ({
+                email: i.email,
+                role: normalizeRole(i.role),
+                projectIds: i.project_ids === null ? null : parse(i.project_ids, []),
+                projectRoles: parse(i.project_roles, {}),
+                canCreateProjects: !!i.can_create_projects,
+                expires: i.expires,
+                createdAt: i.created_at,
+                invitedBy: i.invited_by,
+              })),
           });
         if (path === '/api/admin/audit' && req.method === 'GET')
           return send(res, 200, {
             events: db
-              .prepare('SELECT audit.*, users.name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 100')
+              .prepare('SELECT audit.*, users.name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 200')
               .all(),
           });
         if (path === '/api/admin/invites' && req.method === 'POST') {
           const input = await authenticatedBody(req);
-          if (!['admin', 'member', 'viewer'].includes(input.role) || (input.role === 'admin' && user.role !== 'owner')) fail(403, 'Invalid role');
-          const email = String(input.email ?? '')
-            .trim()
-            .toLowerCase();
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'Enter a valid email');
-          if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) fail(409, 'Account already exists');
-          const projectIds = input.role === 'admin' ? null : projectsInput(input.projectIds);
-          const token = randomBytes(32).toString('base64url');
-          db.prepare('DELETE FROM invites WHERE email=?').run(email);
-          db.prepare('INSERT INTO invites VALUES(?,?,?,?,?,?)').run(hash(token), email, input.role, projectIds, Date.now() + 7 * 86400000, user.id);
-          audit(user.id, 'invite.created', `${email} · ${input.role}`);
-          return send(res, 201, { token, email });
+          const role = normalizeRole(input.role);
+          if (!canAssignRole(user, role)) fail(403, 'Invalid role');
+          // One or many addresses: "a@x.com, b@x.com" or an array.
+          const raw = Array.isArray(input.emails) ? input.emails : String(input.emails ?? input.email ?? '').split(/[\s,;]+/);
+          const emails = [...new Set(raw.map((e) => String(e).trim().toLowerCase()).filter(Boolean))];
+          if (!emails.length) fail(400, 'Enter a valid email');
+          if (emails.length > 50) fail(400, 'Invite at most 50 people at once');
+          const invalid = emails.filter((e) => !EMAIL.test(e) || e.length > 254);
+          if (invalid.length) fail(400, `Enter a valid email: ${invalid.join(', ')}`);
+          const admin = role === 'owner' || role === 'admin';
+          const projectIds = admin ? null : projectsInput(input.projectIds);
+          const projectRoles = admin ? '{}' : levelsInput(input.projectRoles);
+          const canCreate = role === 'viewer' ? 0 : Number(input.canCreateProjects !== false);
+          const invites = [];
+          const skipped = [];
+          for (const email of emails) {
+            if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
+              skipped.push({ email, reason: 'exists' });
+              continue;
+            }
+            const token = randomBytes(32).toString('base64url');
+            db.prepare('DELETE FROM invites WHERE email=?').run(email);
+            db.prepare(
+              'INSERT INTO invites(token,email,role,project_ids,project_roles,can_create_projects,expires,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+            ).run(hash(token), email, role, projectIds, projectRoles, canCreate, Date.now() + 7 * 86400000, user.id, Date.now());
+            audit(user.id, 'invite.created', `${email} · ${role}`);
+            invites.push({ email, token });
+          }
+          if (!invites.length && skipped.length) fail(409, 'Account already exists');
+          return send(res, 201, { invites, skipped, ...(invites.length === 1 ? invites[0] : {}) });
         }
         if (path === '/api/admin/invites' && req.method === 'DELETE') {
           const input = await authenticatedBody(req);
@@ -389,26 +548,63 @@ export function createAuthApi({
           audit(user.id, 'invite.revoked', String(input.email));
           return send(res, 200, { ok: true });
         }
-        if (path.startsWith('/api/admin/members/') && req.method === 'PATCH') {
+        if (path.startsWith('/api/admin/members/') && (req.method === 'PATCH' || req.method === 'DELETE')) {
           const id = path.split('/').at(-1);
           const target = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
           if (!target) fail(404, 'Member not found');
-          if (target.id === user.id || target.role === 'owner' || (target.role === 'admin' && user.role !== 'owner'))
-            fail(403, 'Cannot change this account');
+          if (!canManage(user, target)) fail(403, 'Cannot change this account');
           const input = await authenticatedBody(req);
-          const role = input.role ?? target.role;
-          if (!['admin', 'member', 'viewer'].includes(role) || (role === 'admin' && user.role !== 'owner')) fail(403, 'Invalid role');
-          const access = role === 'admin' ? null : projectsInput(input.projectIds === undefined ? target.projectIds : input.projectIds);
-          db.prepare('UPDATE users SET role=?,project_ids=?,disabled=? WHERE id=?').run(
+          const leavesNoOwner = target.role === 'owner' && activeOwners() <= 1;
+          if (req.method === 'DELETE') {
+            if (leavesNoOwner) fail(400, 'The workspace needs at least one owner');
+            const workspace = readWorkspace();
+            const data = workspace.data;
+            // The person stays on past work, marked as no longer in the workspace.
+            if (data.people[id]) data.people[id] = { ...data.people[id], removed: true };
+            db.exec('BEGIN IMMEDIATE');
+            try {
+              db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+              db.prepare('DELETE FROM users WHERE id=?').run(id);
+              db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(data));
+              db.exec('COMMIT');
+            } catch (e) {
+              db.exec('ROLLBACK');
+              throw e;
+            }
+            closeStreams(id);
+            presence.delete(id);
+            audit(user.id, 'member.removed', target.email);
+            broadcastRevision(workspace.revision + 1, user.id);
+            return send(res, 200, { ok: true });
+          }
+          const role = input.role === undefined ? target.role : normalizeRole(input.role);
+          if (role !== target.role && !canAssignRole(user, role)) fail(403, 'Invalid role');
+          if (leavesNoOwner && (role !== 'owner' || input.disabled)) fail(400, 'The workspace needs at least one owner');
+          const admin = role === 'owner' || role === 'admin';
+          const projectIds = admin ? null : projectsInput(input.projectIds === undefined ? target.projectIds : input.projectIds);
+          const projectRoles = admin ? '{}' : levelsInput(input.projectRoles === undefined ? target.projectRoles : input.projectRoles);
+          const canCreate =
+            role === 'viewer' ? 0 : Number(input.canCreateProjects === undefined ? target.canCreateProjects : !!input.canCreateProjects);
+          const disabled = input.disabled === undefined ? target.disabled : !!input.disabled;
+          db.prepare('UPDATE users SET role=?,project_ids=?,project_roles=?,can_create_projects=?,disabled=? WHERE id=?').run(
             role,
-            access,
-            input.disabled === undefined ? Number(target.disabled) : Number(!!input.disabled),
+            projectIds,
+            projectRoles,
+            canCreate,
+            Number(disabled),
             id,
           );
-          db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
-          closeStreams(id);
-          audit(user.id, 'member.updated', `${target.email} · ${role}`);
-          return send(res, 200, { ok: true });
+          if (disabled) {
+            // Suspension signs the member out everywhere at once.
+            db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+            closeStreams(id);
+          } else notifyAccess(id);
+          audit(
+            user.id,
+            disabled && !target.disabled ? 'member.suspended' : !disabled && target.disabled ? 'member.restored' : 'member.updated',
+            `${target.email} · ${role}`,
+          );
+          return send(res, 200, { member: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)) });
         }
       }
       fail(404, 'Not found');

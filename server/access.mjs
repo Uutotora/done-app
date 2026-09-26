@@ -1,8 +1,35 @@
 import { COLLECTIONS, applyRecord, diffShared, mergeFields, same } from './merge.mjs';
 
+/**
+ * Roles of the workspace, strongest first:
+ * - owner ("super admin"): everything, including managing administrators and other owners;
+ * - admin: members, access, groups, trash and every project;
+ * - editor: works in the projects shared with them, may create projects when allowed;
+ * - viewer: reads the projects shared with them, may comment where allowed.
+ * Older databases call editors "member".
+ */
+export const ROLES = ['owner', 'admin', 'editor', 'viewer'];
+/** What a person can do inside one project, weakest first. */
+export const LEVELS = ['viewer', 'commenter', 'editor', 'full'];
+const rank = (level) => (level ? LEVELS.indexOf(level) : -1);
+export const normalizeRole = (role) => (role === 'member' ? 'editor' : role);
+
 export const isAdmin = (user) => user.role === 'owner' || user.role === 'admin';
 export const canReadProject = (user, id) => isAdmin(user) || user.projectIds === null || (id ? user.projectIds.includes(id) : false);
-export const canWriteProject = (user, id) => user.role !== 'viewer' && canReadProject(user, id);
+
+/** The access level of a user in a project, or null without access. Workspace pages use an undefined project. */
+export function projectLevel(user, id) {
+  if (isAdmin(user)) return 'full';
+  if (!canReadProject(user, id)) return null;
+  const set = id ? user.projectRoles?.[id] : undefined;
+  const base = normalizeRole(user.role) === 'viewer' ? 'viewer' : 'editor';
+  const level = set && ['viewer', 'commenter', 'editor'].includes(set) ? set : base;
+  // Viewers never edit, even if a project was shared with them as editors before their role changed.
+  return normalizeRole(user.role) === 'viewer' && rank(level) > rank('commenter') ? 'commenter' : level;
+}
+export const canWriteProject = (user, id) => rank(projectLevel(user, id)) >= rank('editor');
+export const canCommentProject = (user, id) => rank(projectLevel(user, id)) >= rank('commenter');
+export const canCreateProjects = (user) => isAdmin(user) || (normalizeRole(user.role) === 'editor' && user.canCreateProjects !== false);
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const select = (source, predicate) => Object.fromEntries(Object.entries(source ?? {}).filter(([id, value]) => predicate(value, id)));
 const error = (status, message) => Object.assign(new Error(message), { status });
@@ -96,15 +123,13 @@ export function validateState(state) {
  * record and field by field, after checking every touched record against the
  * member's role and project access. Hidden records can never be read or written.
  */
-export function applyChanges(current, changes, user) {
+export function applyChanges(current, changes, user, info = {}) {
   if (!record(changes) || (changes.records !== undefined && !record(changes.records))) throw error(400, 'Invalid changes');
-  if (user.role === 'viewer') {
-    // Viewers only keep their own inbox: read and archive notifications addressed to them.
-    if (Object.keys(changes.records ?? {}).some((key) => key !== 'notifications') || changes.workspace) throw error(403, 'Read-only access');
-    for (const change of Object.values(changes.records?.notifications ?? {}))
-      if (!change?.before || !change?.after) throw error(403, 'Read-only access');
-    changes = { records: changes.records ?? {} };
-  }
+  // Projects created in this change set: their creator may fill them even without prior access.
+  const created = new Set();
+  info.createdProjects = created;
+  const writable = (projectId) => canWriteProject(user, projectId) || (!!projectId && created.has(projectId));
+  const commentable = (projectId) => canCommentProject(user, projectId) || (!!projectId && created.has(projectId));
   normalizeState(current);
   const visible = visibleState(current, user);
   const next = structuredClone(current);
@@ -125,15 +150,20 @@ export function applyChanges(current, changes, user) {
       if (existing && !visible[key][id]) denied();
       if (key === 'groups' && !isAdmin(user)) denied();
       if (key === 'people' && !isAdmin(user) && id !== user.id) denied();
+      if (key === 'projects' && !existing && after) {
+        if (!canCreateProjects(user)) denied();
+        created.add(id);
+      }
+      // Deleting a whole project is for administrators and for whoever created it.
+      if (key === 'projects' && existing && !after && !isAdmin(user) && existing.createdBy !== user.id) denied();
       if (PROJECT_SCOPED.includes(key)) {
-        if (key === 'projects' && !existing && after && !isAdmin(user) && user.projectIds !== null) denied();
         for (const entity of [existing, after].filter(Boolean)) {
-          if (!canWriteProject(user, scopeOf(key, id, entity, current))) denied();
+          if (!writable(scopeOf(key, id, entity, current))) denied();
         }
       }
       if (key === 'comments') {
         for (const entity of [existing, after].filter(Boolean)) {
-          if (!canWriteProject(user, scopeOf(key, id, entity, next)) && !canWriteProject(user, scopeOf(key, id, entity, current))) denied();
+          if (!commentable(scopeOf(key, id, entity, next)) && !commentable(scopeOf(key, id, entity, current))) denied();
         }
         const targetOf = (c, state) => (c.targetKind === 'item' ? state.items[c.targetId] : state.docs[c.targetId]);
         if (!isAdmin(user)) {
@@ -145,7 +175,12 @@ export function applyChanges(current, changes, user) {
       }
       if (key === 'notifications') {
         // Anyone may notify a teammate, but only as themselves; only the recipient can read or archive it.
-        if (!existing && after && (after.actorId !== user.id || (after.projectId && !canReadProject(user, after.projectId)))) denied();
+        if (
+          !existing &&
+          after &&
+          (after.actorId !== user.id || (after.projectId && !canReadProject(user, after.projectId) && !created.has(after.projectId)))
+        )
+          denied();
         if (existing && existing.recipientId !== user.id) denied();
       }
       applyRecord(next[key], id, { before, after });
@@ -173,7 +208,7 @@ export function applyChanges(current, changes, user) {
         !known.has(a.id) &&
         (a.actorId === user.id || a.actorId === 'plane') &&
         next.items[a.itemId] &&
-        canWriteProject(user, next.items[a.itemId].projectId),
+        writable(next.items[a.itemId].projectId),
     );
     next.activity = [...next.activity, ...accepted].slice(-3000);
   }
@@ -221,7 +256,7 @@ function pruneOrphans(state) {
 
 /** Full-snapshot save (legacy PUT): diff against what the member can see, then apply like a patch. */
 export function mergeState(current, incoming, user) {
-  if (user.role === 'viewer') throw error(403, 'Read-only access');
+  if (normalizeRole(user.role) === 'viewer') throw error(403, 'Read-only access');
   validateState(incoming);
   normalizeState(current);
   const changes = diffShared(visibleState(current, user), sharedState(incoming));

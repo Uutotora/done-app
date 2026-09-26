@@ -7,6 +7,7 @@ import {
   FileText,
   FileVideo,
   File as FileIcon,
+  AudioLines,
   GitBranch,
   Globe,
   PenTool,
@@ -16,7 +17,6 @@ import {
 import { fileCategory, linkService, type FileCategory } from '@/lib/files';
 import type { FileNode } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { PlaudMark } from '../PlaudMark';
 
 const CAT: Record<FileCategory, { icon: typeof FileIcon; color: string }> = {
   image: { icon: FileImage, color: 'purple' },
@@ -47,10 +47,29 @@ export function NodeIcon({ node, size = 18, className }: { node: FileNode; size?
   if (node.kind === 'folder') return <FolderGlyph size={size} />;
   if (node.kind === 'link') {
     const service = linkService(node.url);
-    if (service === 'plaud') return <PlaudMark size={size} />;
-    const Icon = service === 'figma' ? PenTool : service === 'github' ? GitBranch : service === 'youtube' || service === 'loom' ? Play : Globe;
+    // Every link gets the same calm tinted glyph; Plaud recordings are just audio links.
+    const Icon =
+      service === 'plaud'
+        ? AudioLines
+        : service === 'figma'
+          ? PenTool
+          : service === 'github'
+            ? GitBranch
+            : service === 'youtube' || service === 'loom'
+              ? Play
+              : Globe;
     const color =
-      service === 'figma' ? 'purple' : service === 'google' ? 'blue' : service === 'youtube' ? 'red' : service === 'plane' ? 'blue' : 'gray';
+      service === 'plaud'
+        ? 'orange'
+        : service === 'figma'
+          ? 'purple'
+          : service === 'google'
+            ? 'blue'
+            : service === 'youtube'
+              ? 'red'
+              : service === 'plane'
+                ? 'blue'
+                : 'gray';
     return (
       <span
         data-color={color}

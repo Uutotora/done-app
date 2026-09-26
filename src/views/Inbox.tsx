@@ -123,13 +123,7 @@ export function InboxView() {
               >
                 {t(`inbox.${key}`)}
                 {counts[key] > 0 && <span className="text-[11px] tabular-nums text-fg-4">{counts[key]}</span>}
-                {tab === key && (
-                  <motion.span
-                    layoutId="inbox-tab"
-                    className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-fg"
-                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
-                  />
-                )}
+                {tab === key && <span className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-fg" />}
               </button>
             ))}
             <span className="ml-auto hidden self-center text-[11.5px] text-fg-4 md:block">{t('inbox.shortcuts')}</span>
@@ -216,27 +210,17 @@ function InboxRow({
 
   return (
     <motion.div
-      layout="position"
       data-index={index}
       data-peek-keep
-      initial={{ opacity: 0, y: -4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -24, transition: { duration: 0.18 } }}
-      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.1 } }}
+      transition={{ duration: 0.1 }}
       onMouseEnter={onFocus}
-      className={cn(
-        'group/inbox relative flex cursor-pointer gap-3 rounded-lg px-3 py-3 transition-colors duration-100',
-        focused ? 'bg-hover' : 'hover:bg-hover',
-      )}
+      className={cn('group/inbox relative flex cursor-pointer gap-3 rounded-lg px-3 py-3', focused ? 'bg-hover' : 'hover:bg-hover')}
       onClick={open}
     >
-      <span
-        aria-hidden
-        className={cn(
-          'absolute left-0 top-[22px] h-1.5 w-1.5 rounded-full bg-accent transition-[opacity,transform,translate,scale,rotate] duration-200',
-          unread ? 'scale-100 opacity-100' : 'scale-0 opacity-0',
-        )}
-      />
+      <span aria-hidden className={cn('absolute left-0 top-[22px] h-1.5 w-1.5 rounded-full bg-accent', unread ? 'opacity-100' : 'opacity-0')} />
       <Avatar person={actor} size={28} className="mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-1.5 text-[14px] leading-snug">
@@ -266,7 +250,7 @@ function InboxRow({
         )}
       </div>
       <div
-        className="absolute right-2 top-2 flex translate-x-1 items-center gap-0.5 rounded-md bg-elevated opacity-0 shadow-sm transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/inbox:translate-x-0 group-hover/inbox:opacity-100 group-focus-within/inbox:translate-x-0 group-focus-within/inbox:opacity-100"
+        className="absolute right-2 top-2 flex items-center gap-0.5 rounded-md bg-elevated opacity-0 shadow-sm group-hover/inbox:opacity-100 group-focus-within/inbox:opacity-100"
         onClick={(e) => e.stopPropagation()}
       >
         {!n.archivedAt && (

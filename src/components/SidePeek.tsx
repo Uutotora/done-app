@@ -58,10 +58,10 @@ export function SidePeek() {
         <motion.aside
           ref={panelRef}
           key="peek"
-          initial={{ x: '100%', opacity: 0.6 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: '100%', opacity: 0.6 }}
-          transition={{ type: 'spring', stiffness: 380, damping: 40 }}
+          initial={{ x: '100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '100%' }}
+          transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
           className="fixed bottom-0 right-0 top-0 z-30 flex w-[min(760px,92vw)] flex-col border-l border-line bg-bg shadow-[rgba(15,15,15,0.04)_0_0_0_1px,rgba(15,15,15,0.08)_-6px_0_24px]"
         >
           <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3">

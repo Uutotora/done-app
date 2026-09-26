@@ -201,18 +201,15 @@ export function Home() {
                 <motion.div key={p.id} {...fadeUp(Math.min(5 + i, 8))}>
                   <Link
                     to={`/p/${p.id}/overview`}
-                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-[border-color,background-color,box-shadow,transform,translate,scale,rotate] duration-200 ease-out hover:-translate-y-0.5 hover:border-line-strong hover:bg-subtle hover:shadow-sm active:translate-y-0"
+                    className="group block overflow-hidden rounded-xl border border-line bg-bg transition-colors duration-100 hover:bg-subtle"
                   >
                     <div className="relative p-4">
-                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-subtle text-[24px] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:-rotate-6 group-hover:scale-110">
+                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-subtle text-[24px]">
                         <PageIcon icon={p.icon} size={26} />
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="truncate text-[15px] font-semibold">{p.name || t('project.untitled')}</div>
-                        <ArrowUpRight
-                          size={16}
-                          className="shrink-0 -translate-x-1 translate-y-1 text-fg-4 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-200 group-hover:translate-x-0 group-hover:translate-y-0 group-hover:opacity-100"
-                        />
+                        <ArrowUpRight size={16} className="shrink-0 text-fg-4 opacity-0 group-hover:opacity-100" />
                       </div>
                       <div className="mt-0.5 h-5 truncate text-[13px] text-fg-3">{p.summary}</div>
                       <div className="mt-3 flex items-center justify-between">
@@ -313,11 +310,8 @@ export function Home() {
 function QuickAction({ icon, label, onClick, color, hint }: { icon: ReactNode; label: string; onClick: () => void; color: string; hint?: string }) {
   return (
     <motion.button
-      whileHover={{ y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
       onClick={onClick}
-      className="flex h-[52px] items-center gap-2 rounded-lg border border-line px-2.5 text-left text-[13px] font-medium transition-shadow sm:gap-3 sm:px-3.5 sm:text-[14px] hover:shadow-sm"
+      className="flex h-[52px] items-center gap-2 rounded-lg border border-line px-2.5 text-left text-[13px] font-medium transition-colors duration-100 sm:gap-3 sm:px-3.5 sm:text-[14px] hover:bg-subtle"
     >
       <span data-color={color} className="tint flex h-7 w-7 shrink-0 items-center justify-center rounded-md sm:h-8 sm:w-8">
         {icon}
@@ -392,14 +386,14 @@ function ActiveSprints() {
             <Link
               key={sp.id}
               to={`/p/${sp.projectId}/sprints`}
-              className="group rounded-xl border border-line p-4 transition-[border-color,background-color,transform,box-shadow,translate,scale,rotate] duration-200 hover:-translate-y-0.5 hover:border-line-strong hover:bg-subtle hover:shadow-sm"
+              className="group rounded-xl border border-line p-4 transition-colors duration-100 hover:bg-subtle"
             >
               <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
                 <PageIcon icon={project.icon} size={14} />
                 <span className="truncate">{project.name}</span>
               </div>
               <div className="mt-1.5 flex items-center gap-2">
-                <IterationCw size={15} className="shrink-0 text-accent transition-transform duration-500 group-hover:rotate-180" />
+                <IterationCw size={15} className="shrink-0 text-accent" />
                 <span className="truncate text-[15px] font-semibold">{sp.name}</span>
                 <span className="ml-auto shrink-0 text-[12px] text-fg-3">{formatRange(sp.startDate, sp.endDate, lang)}</span>
               </div>

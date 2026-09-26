@@ -1,4 +1,4 @@
-import { ChevronsRight, Menu, Moon, Star, Sun } from 'lucide-react';
+import { Moon, PanelLeft, Star, Sun } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'motion/react';
@@ -43,17 +43,8 @@ export function Topbar({ crumbs, actions, favorite, className }: { crumbs: Crumb
             onPointerEnter={() => !mobile && showSidebarPeek(120)}
             onPointerLeave={() => !mobile && hideSidebarPeek(360)}
             label={t('nav.expand')}
-            className="group/menu relative"
           >
-            {/* Like Notion: the menu icon turns into "open" arrows under the pointer. */}
-            <Menu
-              size={18}
-              className="absolute transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:scale-75 group-hover/menu:opacity-0"
-            />
-            <ChevronsRight
-              size={18}
-              className="absolute -translate-x-1 opacity-0 transition-[opacity,transform,translate,scale,rotate] duration-150 group-hover/menu:translate-x-0 group-hover/menu:opacity-100"
-            />
+            <PanelLeft size={18} strokeWidth={1.7} />
           </IconButton>
         </Tooltip>
       )}
@@ -125,7 +116,7 @@ function PresenceHere() {
             className={cn('relative', i && '-ml-1.5')}
           >
             <Tooltip content={t('presence.viewing', { name: p.name })}>
-              <span className="block rounded-full transition-transform duration-150 hover:z-10 hover:-translate-y-0.5">
+              <span className="block rounded-full">
                 <Avatar person={people[p.id] ?? { id: p.id, name: p.name, color: 'gray' }} size={24} ring />
               </span>
             </Tooltip>

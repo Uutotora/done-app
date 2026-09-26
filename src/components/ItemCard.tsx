@@ -49,7 +49,7 @@ export const ItemCard = forwardRef<
         data-peek-keep
         onClick={() => openPeek(item.id)}
         className={cn(
-          'group/card relative cursor-pointer select-none rounded-lg border border-line bg-elevated p-2.5 shadow-sm transition-[box-shadow,background-color,translate,border-color] duration-150 ease-out hover:-translate-y-px hover:border-line-strong hover:shadow-md',
+          'group/card relative cursor-pointer select-none rounded-lg border border-line bg-elevated p-2.5 shadow-sm transition-colors duration-100 hover:bg-subtle',
           overlay && 'rotate-[1.5deg] cursor-grabbing shadow-lg ring-1 ring-accent/30',
           ghost && 'opacity-40',
           className,
@@ -57,7 +57,7 @@ export const ItemCard = forwardRef<
         {...rest}
       >
         <div
-          className="absolute right-1.5 top-1.5 translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover/card:translate-x-0 group-hover/card:opacity-100 has-[[data-state=open]]:translate-x-0 has-[[data-state=open]]:opacity-100"
+          className="absolute right-1.5 top-1.5 opacity-0 group-hover/card:opacity-100 has-[[data-state=open]]:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <EntriesMenu

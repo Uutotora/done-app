@@ -7,8 +7,22 @@
 /* ------------------------------------------------------------------ */
 :root {
   --bg: #ffffff;
-  --bg-sidebar: #f8f7f5;
-  --sidebar-selected: #eeedeb;
+  --bg-sidebar: #f9f8f6;
+  --sidebar-selected: #eeecea;
+
+  /* Sidebar, measured from Notion's 2026 sidebar. */
+  --sb-text: #5f5e5b;
+  --sb-text-strong: #2c2c2b;
+  --sb-text-group: #54534f;
+  --sb-muted: #91918e;
+  --sb-icon: #9b9a97;
+  --sb-placeholder: #9b9a97;
+  --sb-hover: rgba(0, 0, 0, 0.045);
+  --sb-hover-strong: rgba(0, 0, 0, 0.075);
+  --sb-selected: rgba(0, 0, 0, 0.05);
+  --sb-pressed: rgba(0, 0, 0, 0.08);
+  --sb-border: #e3e2e0;
+  --sb-divider: #eeedeb;
   --bg-elevated: #ffffff;
   --bg-subtle: #f7f7f5;
   --bg-hover: rgba(55, 53, 47, 0.06);
@@ -70,7 +84,20 @@
 .dark {
   --bg: #191919;
   --bg-sidebar: #202020;
-  --sidebar-selected: #303030;
+  --sidebar-selected: #2c2c2c;
+
+  --sb-text: #b3b2af;
+  --sb-text-strong: #ececeb;
+  --sb-text-group: #c5c4c1;
+  --sb-muted: #7f7e7b;
+  --sb-icon: #8e8d8a;
+  --sb-placeholder: #7f7e7b;
+  --sb-hover: rgba(255, 255, 255, 0.055);
+  --sb-hover-strong: rgba(255, 255, 255, 0.09);
+  --sb-selected: rgba(255, 255, 255, 0.075);
+  --sb-pressed: rgba(255, 255, 255, 0.1);
+  --sb-border: #343434;
+  --sb-divider: #2a2a2a;
   --bg-elevated: #252525;
   --bg-subtle: #202020;
   --bg-hover: rgba(255, 255, 255, 0.055);
@@ -511,15 +538,15 @@
 .anim-pop[data-state='open'],
 .anim-pop[data-state='delayed-open'],
 .anim-pop[data-state='instant-open'] {
-  animation: pop-in 170ms var(--ease-out-soft);
+  animation: pop-in 110ms ease-out;
 }
 .anim-pop[data-state='closed'] {
-  animation: pop-out 110ms ease-in forwards;
+  animation: pop-out 80ms ease-in forwards;
 }
 @keyframes pop-in {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(-3px);
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
@@ -540,7 +567,7 @@
   animation: fade-out 140ms ease-in forwards;
 }
 .anim-dialog[data-state='open'] {
-  animation: dialog-in 260ms var(--ease-out-soft);
+  animation: dialog-in 160ms ease-out;
 }
 .anim-dialog[data-state='closed'] {
   animation: dialog-out 140ms ease-in forwards;
@@ -558,7 +585,7 @@
 @keyframes dialog-in {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.97);
+    transform: scale(0.98);
   }
 }
 @keyframes dialog-out {
@@ -589,13 +616,21 @@
   --text-2: #c0bfbd;
   --text-3: #8e8d89;
 }
-.sidebar-row {
-  -webkit-tap-highlight-color: transparent;
-}
-/* Rows without the glide highlight (touch screens) still get feedback on press. */
-@media (hover: none) {
+@layer components {
+  .sidebar-row {
+    color: var(--sb-text);
+    transition: background-color 20ms ease-in;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sidebar-row:hover {
+    background: var(--sb-hover);
+  }
+  .sidebar-row.is-active {
+    background: var(--sb-selected);
+    color: var(--sb-text-strong);
+  }
   .sidebar-row:active {
-    background: var(--bg-active);
+    background: var(--sb-pressed);
   }
 }
 .page-emoji {
@@ -637,13 +672,13 @@ textarea {
     max-width: 85vw;
   }
 }
+/* Touch screens have no hover: keep the disclosure arrows and row actions visible. */
 @media (hover: none) {
-  .workspace-sidebar [class*='opacity-0'] {
-    opacity: 1;
-    transform: none;
+  .workspace-sidebar .sidebar-row [class*='group-hover/row:flex'] {
+    display: flex;
   }
-  .workspace-sidebar [class*='group-hover/row:opacity-0'] {
-    opacity: 0;
+  .workspace-sidebar .sidebar-row [class*='group-hover/row:invisible'] {
+    visibility: hidden;
   }
 }
 

@@ -5,7 +5,8 @@ import { useData } from '@/lib/store';
 import { toast } from '@/lib/ui';
 import { useLang, useT, type TKey } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
-import { matches } from '@/lib/utils';
+import { cn, matches } from '@/lib/utils';
+import { sidebarRow } from './sidebarStyles';
 import { Popover } from './ui/Overlay';
 import { IconButton } from './ui/Button';
 import { PageIcon } from './ui/bits';
@@ -28,10 +29,12 @@ export function TrashButton() {
       align="end"
       sideOffset={10}
       trigger={
-        <button className="flex h-[30px] w-full items-center gap-2 rounded-md px-2 text-[14px] text-fg-2 transition-colors hover:bg-hover">
-          <Trash2 size={17} className="text-fg-3" />
-          <span className="flex-1 truncate text-left">{t('nav.trash')}</span>
-          {trash.length > 0 && <span className="text-[12px] text-fg-4">{trash.length}</span>}
+        <button className={cn(sidebarRow(false), 'data-[state=open]:bg-[var(--sb-selected)]')} style={{ paddingLeft: 8 }}>
+          <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center text-[var(--sb-icon)]">
+            <Trash2 size={18} strokeWidth={1.7} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{t('nav.trash')}</span>
+          {trash.length > 0 && <span className="pr-1 text-[12px] font-normal text-[var(--sb-muted)]">{trash.length}</span>}
         </button>
       }
     >

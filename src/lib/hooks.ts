@@ -58,16 +58,29 @@ export function useDebouncedCallback<A extends unknown[]>(fn: (...args: A) => vo
   fnRef.current = fn;
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastArgs = useRef<A | undefined>(undefined);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const flush = () => {
+      if (!timer.current || !lastArgs.current) return;
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      fnRef.current(...lastArgs.current);
+    };
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    // Also flush when the tab is hidden or closed. Capture listeners on the target run before the
+    // app's own ones, so the unsaved-changes check and the sync on hide already see these edits.
+    window.addEventListener('beforeunload', flush, true);
+    window.addEventListener('pagehide', flush, true);
+    document.addEventListener('visibilitychange', onHidden, true);
+    return () => {
+      window.removeEventListener('beforeunload', flush, true);
+      window.removeEventListener('pagehide', flush, true);
+      document.removeEventListener('visibilitychange', onHidden, true);
       // Flush on unmount so edits made right before navigating away are kept.
-      if (timer.current && lastArgs.current) {
-        clearTimeout(timer.current);
-        fnRef.current(...lastArgs.current);
-      }
-    },
-    [],
-  );
+      flush();
+    };
+  }, []);
   return useCallback(
     (...args: A) => {
       lastArgs.current = args;

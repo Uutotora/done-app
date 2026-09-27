@@ -336,6 +336,7 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
         key={item.id}
         projectId={item.projectId}
         initial={item.content}
+        value={item.content}
         onChange={(blocks) => useData.getState().updateItem(item.id, { content: blocks })}
         placeholder={t('item.descriptionPlaceholder')}
         compact={variant === 'peek'}

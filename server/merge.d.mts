@@ -16,3 +16,4 @@ export function mergeFields<T extends object>(current: T, before: object, after:
 export function diffShared(base: object | null | undefined, next: object): ChangeSet | null;
 export function applyRecord(collection: Record<string, unknown>, id: string, change: RecordChange): void;
 export function applyShared<T extends object>(state: T, changes: ChangeSet): T;
+export function mergeBlocks(current: unknown, before: unknown, after: unknown): unknown;

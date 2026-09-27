@@ -5,6 +5,11 @@ import { cn } from '@/lib/utils';
 export interface EditorProps {
   /** BlockNote document JSON. */
   initial?: unknown[];
+  /**
+   * The stored document as it is now (defaults to `initial`). When it changes, e.g. with a teammate's
+   * edit, the open editor is patched block by block; the echo of this editor's own save is ignored.
+   */
+  value?: unknown[];
   onChange: (blocks: unknown[]) => void;
   placeholder?: string;
   compact?: boolean;

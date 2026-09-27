@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  anchoredRecurrence,
-  nextDueDate,
-  nextInstance,
-  nextOccurrence,
-  normalizeRecurrence,
-  presetOf,
-  recurringItemId,
-} from '@/lib/recurrence';
+import { anchoredRecurrence, nextDueDate, nextInstance, nextOccurrence, normalizeRecurrence, presetOf, recurringItemId } from '@/lib/recurrence';
 import { createEmptyData, dataSnapshot, onRecurrenceSpawn, useData } from '@/lib/store';
 import type { Item, Recurrence } from '@/lib/types';
 

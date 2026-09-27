@@ -140,7 +140,8 @@ describe('mail helpers', () => {
       expires: Date.UTC(2026, 9, 4),
     });
     expect(letter.subject).toBe('Eve <img src=x> приглашает вас в «<script>alert(1)</script>»');
-    expect(letter.html).not.toMatch(/<script|<img/);
+    // The only images are the letter's own (cid:); nothing a user typed becomes markup.
+    expect(letter.html).not.toMatch(/<script|<img src=x|<img(?! src="cid:)/);
     expect(letter.html).toContain('Eve &lt;img src=x&gt;');
     expect(letter.html).toContain('&lt;script&gt;');
     expect(letter.html).toContain('href="https://done.example.com/?invite=t&amp;email=a%40b.co"');
@@ -190,11 +191,9 @@ describe('email on the server', () => {
     expect(letter.text).toContain('наблюдатель');
     expect(letter.html).not.toMatch(/<img src=x|<b>/);
     expect(letter.html).toContain('Acme &lt;b&gt;&amp;&lt;/b&gt; &quot;Co&quot;');
-    // Only the app's own logo and illustration, loaded from the public address.
-    expect([...letter.html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1])).toEqual([
-      `${PUBLIC}/brand/done-mark.png`,
-      `${PUBLIC}/illustrations/states/team.png`,
-    ]);
+    // Only the app's own logo and illustration, carried inside the letter so they show from any address.
+    expect([...letter.html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1])).toEqual(['cid:done-mark@done', 'cid:team@done']);
+    expect((letter as unknown as { attachments: { cid: string }[] }).attachments.map((a) => a.cid)).toEqual(['done-mark@done', 'team@done']);
     expect(letter.text).toContain('Проекты: Все проекты.');
     expect(letter.html).toContain('new1@example.com');
     expect(json.invites[0].url).toBe(`${PUBLIC}/?invite=${json.invites[0].token}&email=new1%40example.com`);

@@ -326,7 +326,6 @@ describe('invitation letter', () => {
         { name: 'Mobile <app>', icon: '📱' },
         { name: 'Web', icon: 'lucide:globe' },
       ],
-      assets: PUBLIC,
     });
     expect(letter.subject).toBe('Olga приглашает вас в «Acme»');
     expect(letter.text).toContain('Проекты: 📱 Mobile <app>, Web.');
@@ -340,7 +339,8 @@ describe('invitation letter', () => {
     expect(ru.subject).toBe('Приглашение в Done');
     const en = inviteEmail({ lang: 'en', workspace: '', inviter: 'Mike', role: 'viewer', link: `${PUBLIC}/`, expires: Date.now() });
     expect(en.subject).toBe('Mike invited you to Done');
-    expect(en.html).not.toContain('<img');
+    // The logo and illustration travel inside the letter, whatever address Done runs on.
+    expect(en.attachments.map((a: { cid: string }) => a.cid)).toEqual(['done-mark@done', 'team@done']);
   });
 });
 

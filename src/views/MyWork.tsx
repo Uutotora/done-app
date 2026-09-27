@@ -14,6 +14,7 @@ import { Avatar, DoneCheck, PageIcon } from '@/components/ui/bits';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 import { PersonPicker, PriorityPicker } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
+import { RecurrenceMark } from '@/components/pickers/RecurrencePicker';
 import { EntriesMenu } from '@/components/ui/Overlay';
 
 export function MyWork() {
@@ -226,11 +227,12 @@ export function MyWork() {
                       <button
                         aria-label={t('prop.dates')}
                         className={cn(
-                          'w-[76px] shrink-0 rounded px-1 py-1 text-right text-[12px] hover:bg-hover sm:w-[90px]',
+                          'flex w-[76px] shrink-0 items-center justify-end gap-1 rounded px-1 py-1 text-right text-[12px] hover:bg-hover sm:w-[90px]',
                           bucket === 'overdue' ? 'text-[var(--c-red-text)]' : 'text-fg-3',
                         )}
                       >
-                        {formatShortDate(item.dueDate, lang) || t('common.noDate')}
+                        <RecurrenceMark rule={item.recurrence} size={11} className="text-inherit" />
+                        <span className="truncate">{formatShortDate(item.dueDate, lang) || t('common.noDate')}</span>
                       </button>
                     </DatePicker>
                     <PersonPicker value={item.assigneeId} onChange={(assigneeId) => update(item.id, { assigneeId })}>

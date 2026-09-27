@@ -42,7 +42,8 @@ import { deleteItemsWithUndo, setItemStatus } from '@/lib/actions';
 import { planeReady, pushItemsToPlane } from '@/lib/plane';
 import type { ID, Item } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { ViewBar, NewButton } from '@/components/ViewBar';
+import { ViewBar } from '@/components/ViewBar';
+import { NewWithTemplates } from '@/components/templates/TemplateMenu';
 import { FilterButton, FilterPills, GroupButton, PropertiesButton, SearchToggle, SortButton } from '@/components/QueryControls';
 import { Avatar, Chip, EmptyState } from '@/components/ui/bits';
 import { ContextMenu, Tooltip } from '@/components/ui/Overlay';
@@ -58,6 +59,7 @@ import {
 } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
 import { RicePicker } from '@/components/pickers/RicePicker';
+import { RecurrenceMark } from '@/components/pickers/RecurrencePicker';
 import { PriorityIcon, TypeIcon } from '@/components/pickers/icons';
 import { itemMenuEntries } from '@/components/itemMenu';
 
@@ -144,7 +146,12 @@ export function BacklogView() {
         <GroupButton group={settings.group} onChange={(group) => set({ group })} />
         <SearchToggle value={settings.filter.search} onChange={(search) => set({ filter: { ...settings.filter, search } })} />
         <PropertiesButton columns={columns} hidden={settings.hidden} onChange={(hidden) => set({ hidden })} />
-        <NewButton onClick={() => openCreateItem({ projectId, ...(preset.v === 'bugs' ? { type: 'bug' } : {}) })}>{t('common.new')}</NewButton>
+        <NewWithTemplates
+          projectId={projectId}
+          onCreate={(templateId) => openCreateItem({ projectId, ...(preset.v === 'bugs' ? { type: 'bug' } : {}) }, templateId)}
+        >
+          {t('common.new')}
+        </NewWithTemplates>
       </ViewBar>
       <FilterPills filter={settings.filter} onChange={(filter) => set({ filter })} />
       <BacklogTable projectId={projectId!} settings={settings} columns={columns.filter((c) => !settings.hidden.includes(c.key))} />
@@ -598,9 +605,12 @@ function Row({
           <DatePicker start={item.startDate} end={item.dueDate} onChange={(s, e) => set({ startDate: s, dueDate: e })}>
             <CellButton>
               {item.dueDate ? (
-                <span className={cn('truncate', overdue && 'font-medium text-[var(--c-red-text)]')}>
-                  {formatRange(item.startDate, item.dueDate, lang)}
-                </span>
+                <>
+                  <span className={cn('truncate', overdue && 'font-medium text-[var(--c-red-text)]')}>
+                    {formatRange(item.startDate, item.dueDate, lang)}
+                  </span>
+                  <RecurrenceMark rule={item.recurrence} className="ml-1.5" />
+                </>
               ) : (
                 <Empty />
               )}

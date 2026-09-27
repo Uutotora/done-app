@@ -15,6 +15,7 @@ import {
   Compass,
   FolderOpen,
   IterationCw,
+  Repeat,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -48,6 +49,7 @@ import {
 } from './pickers/Pickers';
 import { DatePicker } from './pickers/DatePicker';
 import { RicePicker } from './pickers/RicePicker';
+import { RecurrencePicker, recurrenceLabel } from './pickers/RecurrencePicker';
 import { PriorityIcon, StatusIcon, TypeIcon } from './pickers/icons';
 import { descendantsOf, progressOf } from '@/lib/selectors';
 
@@ -161,6 +163,13 @@ export function ItemDetail({ item, variant = 'peek' }: { item: Item; variant?: '
             <PropValue empty={!item.dueDate}>{item.dueDate ? formatRange(item.startDate, item.dueDate, lang) : t('prop.empty')}</PropValue>
           </DatePicker>
         </Prop>
+        {((item.type !== 'milestone' && item.type !== 'initiative') || item.recurrence) && (
+          <Prop icon={<Repeat size={15} />} label={t('prop.repeat')}>
+            <RecurrencePicker value={item.recurrence} onChange={(recurrence) => set({ recurrence })}>
+              <PropValue empty={!item.recurrence}>{recurrenceLabel(t, item.recurrence) ?? t('prop.empty')}</PropValue>
+            </RecurrencePicker>
+          </Prop>
+        )}
         {item.type !== 'initiative' && item.type !== 'milestone' && (
           <Prop icon={<IterationCw size={15} />} label={t('prop.sprint')}>
             <SprintPicker projectId={item.projectId} value={item.sprintId} onChange={(v) => set({ sprintId: v })}>

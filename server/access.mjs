@@ -34,12 +34,21 @@ const record = (value) => value && typeof value === 'object' && !Array.isArray(v
 const select = (source, predicate) => Object.fromEntries(Object.entries(source ?? {}).filter(([id, value]) => predicate(value, id)));
 const error = (status, message) => Object.assign(new Error(message), { status });
 const BAD_IDS = ['__proto__', 'prototype', 'constructor'];
-const PROJECT_SCOPED = ['projects', 'items', 'docs', 'files', 'maps', 'sprints'];
+const PROJECT_SCOPED = ['projects', 'items', 'docs', 'files', 'maps', 'sprints', 'templates'];
 const ITEM_STATUSES = ['idea', 'backlog', 'planned', 'in_progress', 'in_review', 'done', 'canceled'];
 const ITEM_TYPES = ['initiative', 'epic', 'feature', 'task', 'bug', 'milestone'];
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'];
 const SPRINT_STATUSES = ['planned', 'active', 'completed'];
 const NOTIFICATION_LIMIT = 400;
+const HORIZONS = ['now', 'next', 'later'];
+const RECURRENCE_FREQS = ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'];
+const TEMPLATE_SUBTASK_LIMIT = 50;
+const TEMPLATE_TEXT_LIMIT = 500;
+const strings = (value) => Array.isArray(value) && value.every((v) => typeof v === 'string');
+const integerIn = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+/** Repeat rule of a task or template: { freq, interval 1..365, day of month 1..31 (optional) }. */
+const validRecurrence = (r) =>
+  record(r) && RECURRENCE_FREQS.includes(r.freq) && integerIn(r.interval, 1, 365) && (r.day === undefined || integerIn(r.day, 1, 31));
 
 /** Workspaces saved by older versions lack collections added later. */
 export function normalizeState(state) {
@@ -77,6 +86,8 @@ export function visibleState(state, user) {
     // Maps are keyed by their project id and carry no projectId field.
     maps: select(state.maps, (_m, id) => !!projects[id]),
     sprints: select(state.sprints, (s) => !!projects[s.projectId]),
+    // Templates shared by every project follow the same rule as workspace pages.
+    templates: select(state.templates, (t) => canReadProject(user, t.projectId)),
     comments: select(state.comments, (c) => (c.targetKind === 'item' ? !!items[c.targetId] : !!docs[c.targetId])),
     notifications: select(state.notifications, (n) => n.recipientId === user.id && (!n.projectId || !!projects[n.projectId])),
     activity: (state.activity ?? []).filter((a) => !!items[a.itemId]),
@@ -104,9 +115,30 @@ export function validateState(state) {
       !ITEM_TYPES.includes(item.type) ||
       !PRIORITIES.includes(item.priority) ||
       (item.dependsOn !== undefined && (!Array.isArray(item.dependsOn) || item.dependsOn.some((id) => typeof id !== 'string'))) ||
-      (item.sprintId !== undefined && typeof item.sprintId !== 'string')
+      (item.sprintId !== undefined && typeof item.sprintId !== 'string') ||
+      (item.recurrence !== undefined && !validRecurrence(item.recurrence))
     )
       throw error(400, 'Invalid task');
+  }
+  for (const tpl of Object.values(state.templates)) {
+    if (
+      (tpl.projectId !== undefined && (typeof tpl.projectId !== 'string' || !Object.hasOwn(state.projects, tpl.projectId))) ||
+      typeof tpl.name !== 'string' ||
+      tpl.name.length > TEMPLATE_TEXT_LIMIT ||
+      !ITEM_TYPES.includes(tpl.type) ||
+      !PRIORITIES.includes(tpl.priority) ||
+      (tpl.status !== undefined && !ITEM_STATUSES.includes(tpl.status)) ||
+      !strings(tpl.tags) ||
+      (tpl.icon !== undefined && (typeof tpl.icon !== 'string' || tpl.icon.length > TEMPLATE_TEXT_LIMIT)) ||
+      (tpl.assigneeId !== undefined && typeof tpl.assigneeId !== 'string') ||
+      (tpl.horizon !== undefined && !HORIZONS.includes(tpl.horizon)) ||
+      (tpl.estimate !== undefined && (typeof tpl.estimate !== 'number' || !Number.isFinite(tpl.estimate) || tpl.estimate < 0)) ||
+      (tpl.subtasks !== undefined &&
+        (!strings(tpl.subtasks) || tpl.subtasks.length > TEMPLATE_SUBTASK_LIMIT || tpl.subtasks.some((t) => t.length > TEMPLATE_TEXT_LIMIT))) ||
+      (tpl.content !== undefined && !Array.isArray(tpl.content)) ||
+      (tpl.recurrence !== undefined && !validRecurrence(tpl.recurrence))
+    )
+      throw error(400, 'Invalid template');
   }
   for (const sprint of Object.values(state.sprints)) {
     if (!state.projects[sprint.projectId] || typeof sprint.name !== 'string' || !SPRINT_STATUSES.includes(sprint.status))
@@ -236,6 +268,9 @@ function pruneOrphans(state) {
     for (const [id, entity] of Object.entries(state[key])) if (!state.projects[entity.projectId]) delete state[key][id];
   }
   for (const id of Object.keys(state.maps)) if (!state.projects[id]) delete state.maps[id];
+  for (const [id, tpl] of Object.entries(state.templates)) {
+    if (tpl.projectId !== undefined && !Object.hasOwn(state.projects, tpl.projectId)) delete state.templates[id];
+  }
   for (const [id, item] of Object.entries(state.items)) {
     if (item.parentId && !state.items[item.parentId]) state.items[id] = { ...item, parentId: undefined };
     if (item.sprintId && !state.sprints[item.sprintId]) state.items[id] = { ...state.items[id], sprintId: undefined };

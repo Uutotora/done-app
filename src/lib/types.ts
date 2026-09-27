@@ -113,6 +113,17 @@ export interface PlaneIssueRef {
   demo?: boolean;
 }
 
+export type RecurrenceFreq = 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'yearly';
+
+/** Repeat rule of a recurring task: when it is done, the next copy is created with the next due date. */
+export interface Recurrence {
+  freq: RecurrenceFreq;
+  /** Every N days, weeks, months or years, 1..365. Weekday series ignore it. */
+  interval: number;
+  /** Day of month the series follows (1..31), so a month-end series returns to the 31st after a short month. */
+  day?: number;
+}
+
 export interface Item {
   id: ID;
   projectId: ID;
@@ -137,9 +148,35 @@ export interface Item {
   order: number;
   content?: unknown[];
   plane?: PlaneIssueRef;
+  /** Repeats when done; only the open instance of a series keeps the rule. */
+  recurrence?: Recurrence;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
   completedAt?: ISODateTime;
+}
+
+/** Reusable starting point for new tasks, like Notion database templates. */
+export interface ItemTemplate {
+  id: ID;
+  /** Undefined means the template is offered in every project. */
+  projectId?: ID;
+  name: string;
+  icon?: IconValue;
+  type: ItemType;
+  priority: Priority;
+  status?: ItemStatus;
+  tags: string[];
+  estimate?: number;
+  assigneeId?: ID;
+  horizon?: Horizon;
+  recurrence?: Recurrence;
+  /** Description copied into every new task. */
+  content?: unknown[];
+  /** Titles of sub-tasks created together with the task. */
+  subtasks?: string[];
+  createdBy?: ID;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
 }
 
 export type DocFont = 'default' | 'serif' | 'mono';
@@ -321,7 +358,7 @@ export interface Activity {
   at: ISODateTime;
 }
 
-export type TrashKind = 'project' | 'item' | 'doc' | 'file' | 'group' | 'sprint';
+export type TrashKind = 'project' | 'item' | 'doc' | 'file' | 'group' | 'sprint' | 'template';
 
 export interface TrashEntry {
   id: ID;
@@ -367,6 +404,7 @@ export interface DataState {
   files: Record<ID, FileNode>;
   maps: Record<ID, ProjectMap>;
   sprints: Record<ID, Sprint>;
+  templates: Record<ID, ItemTemplate>;
   comments: Record<ID, Comment>;
   notifications: Record<ID, AppNotification>;
   activity: Activity[];

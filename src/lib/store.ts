@@ -5,6 +5,8 @@ import { nowIso, uid } from './utils';
 import { allowMutation } from './mutationPolicy';
 import { canDependOn } from './work';
 import { PLANE_DEFAULTS, DEFAULT_AI_MODEL, PLANE_GROUP_TO_STATUS } from './constants';
+import { anchoredRecurrence, nextInstance, normalizeRecurrence, recurringActivityId } from './recurrence';
+import { childType, itemFromTemplate, sanitizeTemplate, templateFromItem } from './templates';
 import type {
   Activity,
   ActivityKind,
@@ -17,6 +19,7 @@ import type {
   FileNode,
   ID,
   Item,
+  ItemTemplate,
   Lang,
   Person,
   PlaneConfig,
@@ -32,7 +35,7 @@ import type {
   Workspace,
 } from './types';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 const ACTIVITY_LIMIT = 3000;
 const TRASH_TTL_DAYS = 30;
 
@@ -51,6 +54,7 @@ export function createEmptyData(lang: Lang, name = ''): DataState {
     files: {},
     maps: {},
     sprints: {},
+    templates: {},
     comments: {},
     notifications: {},
     activity: [],
@@ -81,10 +85,13 @@ export interface Snapshot {
   files?: Record<ID, FileNode>;
   maps?: Record<ID, ProjectMap>;
   sprints?: Record<ID, Sprint>;
+  templates?: Record<ID, ItemTemplate>;
   comments?: Record<ID, Comment>;
 }
 
 type NewItem = Partial<Item> & Pick<Item, 'projectId' | 'title'>;
+/** Where and how a task made from a template starts; anything else comes from the template. */
+export type TemplateOverrides = Partial<Omit<Item, 'id' | 'createdAt' | 'updatedAt'>> & Pick<Item, 'projectId'>;
 
 export interface Actions {
   replaceAll: (data: DataState) => void;
@@ -140,6 +147,14 @@ export interface Actions {
   /** Closes the sprint and moves unfinished work to the next sprint or back to the backlog. Returns the next sprint id. */
   completeSprint: (id: ID, carryOver: 'next' | 'backlog') => ID | undefined;
   deleteSprint: (id: ID) => Snapshot;
+
+  createTemplate: (patch?: Partial<ItemTemplate>) => ID;
+  updateTemplate: (id: ID, patch: Partial<ItemTemplate>) => void;
+  deleteTemplate: (id: ID) => Snapshot;
+  /** Creates a task from a template together with its sub-tasks. Returns the task id. */
+  createItemFromTemplate: (templateId: ID, overrides: TemplateOverrides) => ID | undefined;
+  /** Saves a task (fields, description, titles of direct sub-tasks) as a template of its project. */
+  saveItemAsTemplate: (itemId: ID, name: string) => ID | undefined;
 
   markNotifications: (ids: ID[], read: boolean) => void;
   archiveNotifications: (ids: ID[], archived: boolean) => void;
@@ -274,6 +289,27 @@ function addDays(date: string, days: number): string {
 
 function todayIso(): string {
   return localDate(new Date());
+}
+
+let recurrenceListener: ((created: Item[]) => void) | undefined;
+/** Lets the interface announce the next instance of a recurring task; the store itself stays free of UI code. */
+export function onRecurrenceSpawn(listener: ((created: Item[]) => void) | undefined) {
+  recurrenceListener = listener;
+}
+
+/**
+ * `next` has just become done: its repeat rule moves to a fresh open instance, which is added to
+ * `items` (mutated) with its "created" activity. Returns that instance.
+ */
+function completeRecurring(next: Item, items: Record<ID, Item>, acts: Activity[], actorId: ID, ts: string): Item | undefined {
+  if (!next.recurrence) return undefined;
+  const instance = nextInstance(next, todayIso(), ts);
+  delete next.recurrence;
+  // Already created, e.g. by another tab that completed the same task: keep that one.
+  if (!instance || items[instance.id]) return undefined;
+  items[instance.id] = instance;
+  acts.push({ id: recurringActivityId(instance.id), itemId: instance.id, actorId, kind: 'created', at: ts });
+  return instance;
 }
 
 export const useData = create<Store>()(
@@ -416,7 +452,13 @@ export const useData = create<Store>()(
             updatedAt: ts,
           };
         }
-        set({ items });
+        const templates = { ...get().templates };
+        for (const tpl of Object.values(s.templates)) {
+          if (tpl.projectId !== id) continue;
+          const tid = uid('tp');
+          templates[tid] = { ...tpl, id: tid, projectId: copyId, createdBy: s.meId, createdAt: ts, updatedAt: ts };
+        }
+        set({ items, templates });
         return copyId;
       },
       deleteProject: (id) => {
@@ -436,6 +478,9 @@ export const useData = create<Store>()(
         const sprintIds = Object.values(s.sprints)
           .filter((sp) => sp.projectId === id)
           .map((sp) => sp.id);
+        const templateIds = Object.values(s.templates)
+          .filter((tpl) => tpl.projectId === id)
+          .map((tpl) => tpl.id);
         const snap: Snapshot = {
           projects: pick(s.projects, [id]),
           items: pick(s.items, itemIds),
@@ -443,6 +488,7 @@ export const useData = create<Store>()(
           files: pick(s.files, fileIds),
           maps: pick(s.maps, [id]),
           sprints: pick(s.sprints, sprintIds),
+          templates: pick(s.templates, templateIds),
           comments: pick(s.comments, commentIds),
         };
         set({
@@ -452,6 +498,7 @@ export const useData = create<Store>()(
           files: omit(s.files, fileIds),
           maps: omit(s.maps, [id]),
           sprints: omit(s.sprints, sprintIds),
+          templates: omit(s.templates, templateIds),
           comments: omit(s.comments, commentIds),
         });
         return snap;
@@ -477,6 +524,12 @@ export const useData = create<Store>()(
         };
         if (item.status === 'done' && !item.completedAt) item.completedAt = ts;
         if (item.sprintId && s.sprints[item.sprintId]?.projectId !== item.projectId) item.sprintId = undefined;
+        const rule = normalizeRecurrence(item.recurrence);
+        if (rule) {
+          // A recurring task needs a due date to count the next one from.
+          item.dueDate ??= todayIso();
+          item.recurrence = anchoredRecurrence(rule, item.dueDate);
+        } else delete item.recurrence;
         set((st) => ({
           items: { ...st.items, [id]: item },
           activity: withActivity(st.activity, [{ id: uid('ac'), itemId: id, actorId: st.meId, kind: 'created', at: ts }]),
@@ -485,7 +538,8 @@ export const useData = create<Store>()(
         return id;
       },
       updateItem: (id, patch) => get().updateItems([id], patch),
-      updateItems: (ids, patch) =>
+      updateItems: (ids, patch) => {
+        const spawned: Item[] = [];
         set((s) => {
           if (patch.projectId && !s.projects[patch.projectId]) return {};
           const items = { ...s.items };
@@ -532,13 +586,31 @@ export const useData = create<Store>()(
             }
             if (changes.dependsOn) next.dependsOn = [...new Set(changes.dependsOn)].filter((dep) => canDependOn(id, dep, items));
             if (changes.status && changes.status !== prev.status) next.completedAt = changes.status === 'done' ? ts : undefined;
+            if ('recurrence' in changes) {
+              const rule = normalizeRecurrence(changes.recurrence);
+              if (rule) {
+                // A recurring task needs a due date to count the next one from.
+                next.dueDate ??= todayIso();
+                next.recurrence = anchoredRecurrence(rule, next.dueDate);
+              } else delete next.recurrence;
+            } else if (next.recurrence && next.dueDate && changes.dueDate !== undefined && changes.dueDate !== prev.dueDate) {
+              // A due date moved by hand sets the day of month the series follows from now on.
+              next.recurrence = anchoredRecurrence(next.recurrence, next.dueDate);
+            }
             items[id] = next;
             acts.push(...diffActivity(prev, next, s.meId, ts));
             notes.push(...itemNotifications(prev, next, ids.length > 1));
+            // Every status change goes through here, so this is the one place recurring tasks repeat.
+            if (next.status === 'done' && prev.status !== 'done') {
+              const instance = completeRecurring(next, items, acts, s.meId, ts);
+              if (instance) spawned.push(instance);
+            }
           }
           const notifications = notifyAll(s, notes, ts);
           return { items, activity: withActivity(s.activity, acts), ...(notifications ? { notifications } : {}) };
-        }),
+        });
+        if (spawned.length) recurrenceListener?.(spawned);
+      },
       duplicateItem: (id) => {
         const s = get();
         const src = s.items[id];
@@ -850,6 +922,61 @@ export const useData = create<Store>()(
         return snap;
       },
 
+      createTemplate: (patch = {}) => {
+        const id = uid('tp');
+        const ts = nowIso();
+        const tpl: ItemTemplate = sanitizeTemplate({
+          name: '',
+          type: 'task',
+          priority: 'none',
+          tags: [],
+          createdBy: get().meId,
+          ...patch,
+          id,
+          createdAt: ts,
+          updatedAt: ts,
+        });
+        set((s) => ({ templates: { ...s.templates, [id]: tpl } }));
+        return id;
+      },
+      updateTemplate: (id, patch) =>
+        set((s) =>
+          s.templates[id] ? { templates: { ...s.templates, [id]: sanitizeTemplate({ ...s.templates[id], ...patch, id, updatedAt: nowIso() }) } } : {},
+        ),
+      deleteTemplate: (id) => {
+        const s = get();
+        set({ templates: omit(s.templates, [id]) });
+        return { templates: pick(s.templates, [id]) };
+      },
+      createItemFromTemplate: (templateId, overrides) => {
+        const s = get();
+        const tpl = s.templates[templateId];
+        if (!tpl || !s.projects[overrides.projectId]) return undefined;
+        const id = get().createItem({ ...itemFromTemplate(tpl, s.people), ...overrides, title: overrides.title ?? tpl.name });
+        const parent = id ? get().items[id] : undefined;
+        if (!id || !parent) return undefined;
+        const titles = tpl.subtasks ?? [];
+        titles.forEach((title, i) =>
+          get().createItem({
+            projectId: parent.projectId,
+            parentId: id,
+            title,
+            type: childType(parent.type),
+            status: 'backlog',
+            // Keeps the template's order, right below the new task.
+            order: parent.order + (i + 1) / (titles.length + 1),
+          }),
+        );
+        return id;
+      },
+      saveItemAsTemplate: (itemId, name) => {
+        const s = get();
+        const item = s.items[itemId];
+        if (!item) return undefined;
+        const children = Object.values(s.items).filter((i) => i.parentId === itemId);
+        return get().createTemplate(templateFromItem(item, children, name));
+      },
+
       markNotifications: (ids, read) =>
         set((s) => {
           const ts = nowIso();
@@ -941,6 +1068,7 @@ export const useData = create<Store>()(
                 next.completedAt = mapped === 'done' ? ts : undefined;
                 next.updatedAt = ts;
                 acts.push({ id: uid('ac'), itemId: it.id, actorId: 'plane', kind: 'status', from: it.status, to: mapped, at: ts });
+                if (mapped === 'done') completeRecurring(next, items, acts, s.meId, ts);
               }
             }
             items[it.id] = next;
@@ -959,6 +1087,7 @@ export const useData = create<Store>()(
           files: { ...s.files, ...(snap.files ?? {}) },
           maps: { ...s.maps, ...(snap.maps ?? {}) },
           sprints: { ...s.sprints, ...(snap.sprints ?? {}) },
+          templates: { ...s.templates, ...(snap.templates ?? {}) },
           comments: { ...s.comments, ...(snap.comments ?? {}) },
         })),
     }),
@@ -999,6 +1128,7 @@ export const useData = create<Store>()(
           data.sprints ??= {};
           data.notifications ??= {};
         }
+        if (version < 5) data.templates ??= {};
         return data as DataState;
       },
       partialize: (s) => {

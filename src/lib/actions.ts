@@ -1,6 +1,7 @@
-import { useData, type Snapshot } from './store';
+import { onRecurrenceSpawn, useData, type Snapshot } from './store';
 import { toast, useUI } from './ui';
 import { translate, type TKey } from './i18n';
+import { formatShortDate } from './dates';
 import type { ID, ItemStatus, TrashKind } from './types';
 
 /** Changes status and throws confetti when something becomes done. */
@@ -69,6 +70,29 @@ export function deleteNodesWithUndo(ids: ID[]) {
   const title = ids.length === 1 ? first.name : `${first.name} +${ids.length - 1}`;
   trashWithUndo('file', title, icon, s.deleteNodes(ids), 'files.deleted');
 }
+
+export function deleteTemplateWithUndo(id: ID) {
+  const s = useData.getState();
+  const tpl = s.templates[id];
+  if (!tpl) return;
+  trashWithUndo('template', tpl.name, tpl.icon, s.deleteTemplate(id), 'template.deleted');
+}
+
+// A recurring task that was just done announces its next round, wherever it was completed.
+onRecurrenceSpawn((created) => {
+  const lang = useData.getState().prefs.lang;
+  const [first] = created;
+  const when = formatShortDate(first.dueDate, lang);
+  // "Next repeat: tomorrow" reads as a sentence, dates stay as they are.
+  const relative = when === translate(lang, 'common.today') || when === translate(lang, 'common.tomorrow');
+  toast({
+    message:
+      created.length === 1
+        ? translate(lang, 'repeat.next', { date: relative ? when.toLowerCase() : when })
+        : translate(lang, 'repeat.nextMany', { n: created.length }),
+    action: created.length === 1 ? { label: translate(lang, 'common.open'), run: () => useUI.getState().openPeek(first.id) } : undefined,
+  });
+});
 
 export function deleteSprintWithUndo(id: ID) {
   const s = useData.getState();

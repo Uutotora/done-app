@@ -7,7 +7,7 @@
 // never overwrite each other, and edits to different records never conflict.
 
 /** Collections of records keyed by id that are shared between members. */
-export const COLLECTIONS = ['projects', 'items', 'docs', 'files', 'maps', 'groups', 'people', 'comments', 'sprints', 'notifications'];
+export const COLLECTIONS = ['projects', 'items', 'docs', 'files', 'maps', 'groups', 'people', 'comments', 'sprints', 'notifications', 'templates'];
 
 export const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 

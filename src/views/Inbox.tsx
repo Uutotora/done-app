@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Archive, ArchiveRestore, CheckCheck, Circle, CircleCheck, Inbox as InboxIcon } from 'lucide-react';
+import { AlarmClock, Archive, ArchiveRestore, CalendarClock, CheckCheck, Circle, CircleCheck, Inbox as InboxIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { isToday, isYesterday, parseISO } from 'date-fns';
@@ -7,7 +7,7 @@ import { useData } from '@/lib/store';
 import { useUI, toast } from '@/lib/ui';
 import { useLang, useT } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
-import { notificationHeadline, notificationTarget, useMyNotifications } from '@/lib/inbox';
+import { isReminder, notificationHeadline, notificationTarget, reminderLabel, useMyNotifications } from '@/lib/inbox';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 import { Topbar } from '@/components/Topbar';
@@ -199,6 +199,7 @@ function InboxRow({
   const archive = useData((s) => s.archiveNotifications);
   const openPeek = useUI((s) => s.openPeek);
   const unread = !n.readAt && !n.archivedAt;
+  const reminder = isReminder(n) ? reminderLabel(n, lang) : undefined;
 
   const open = () => {
     onOpened();
@@ -221,11 +222,23 @@ function InboxRow({
       onClick={open}
     >
       <span aria-hidden className={cn('absolute left-0 top-[22px] h-1.5 w-1.5 rounded-full bg-accent', unread ? 'opacity-100' : 'opacity-0')} />
-      <Avatar person={actor} size={28} className="mt-0.5" />
+      {reminder ? (
+        <span
+          aria-hidden
+          data-color={n.kind === 'overdue' ? 'red' : 'orange'}
+          className="tint mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+        >
+          {n.kind === 'overdue' ? <AlarmClock size={15} strokeWidth={2} /> : <CalendarClock size={15} strokeWidth={2} />}
+        </span>
+      ) : (
+        <Avatar person={actor} size={28} className="mt-0.5" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-1.5 text-[14px] leading-snug">
-          <span className={cn('font-semibold', !unread && 'font-medium text-fg-2')}>{actor?.name ?? '—'}</span>
-          <span className={cn(unread ? 'text-fg-2' : 'text-fg-3')}>{notificationHeadline(n, lang)}</span>
+          <span className={cn('font-semibold', !unread && 'font-medium text-fg-2')}>{reminder ? reminder.title : (actor?.name ?? '—')}</span>
+          {(!reminder || reminder.detail) && (
+            <span className={cn(unread ? 'text-fg-2' : 'text-fg-3')}>{reminder ? reminder.detail : notificationHeadline(n, lang)}</span>
+          )}
           <span className="text-[12px] text-fg-4">{timeAgo(n.createdAt, lang)}</span>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[13.5px]">

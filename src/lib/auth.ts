@@ -358,6 +358,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
   switch (action) {
     case 'markNotifications':
     case 'archiveNotifications':
+    case 'addReminders':
     case 'pushTrash':
     case 'restore':
       return true;

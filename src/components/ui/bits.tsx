@@ -1,6 +1,17 @@
 import { motion } from 'motion/react';
-import { forwardRef, useEffect, useId, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from 'react';
 import { cn, initials } from '@/lib/utils';
+import { isSafePhoto } from '@/lib/photo';
 import { getIcon } from '@/lib/icons';
 import type { ColorName, IconValue, Person } from '@/lib/types';
 
@@ -40,13 +51,51 @@ export function Chip({
 
 /* --------------------------------- Avatar --------------------------------- */
 
+/** A person's photo, emoji avatar or initials on their color, in that order. */
 export function Avatar({ person, size = 20, className, ring }: { person?: Person; size?: number; className?: string; ring?: boolean }) {
+  // A photo that fails to decode falls back to initials instead of a broken image.
+  const [broken, setBroken] = useState<string>();
   if (!person) {
     return (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong', className)}
         style={{ width: size, height: size }}
       />
+    );
+  }
+  if (isSafePhoto(person.photo) && broken !== person.photo) {
+    const photo = person.photo;
+    return (
+      <img
+        src={photo}
+        alt={person.name}
+        title={person.name}
+        draggable={false}
+        decoding="async"
+        onError={() => setBroken(photo)}
+        className={cn('inline-block shrink-0 select-none rounded-full object-cover', ring && 'ring-2 ring-[var(--bg)]', className)}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  if (person.avatar) {
+    return (
+      <span
+        data-color={person.color}
+        title={person.name}
+        role="img"
+        aria-label={person.name}
+        className={cn('tint inline-flex shrink-0 select-none items-center justify-center rounded-full', ring && 'ring-2 ring-[var(--bg)]', className)}
+        style={{
+          width: size,
+          height: size,
+          fontSize: Math.max(8, size * 0.56),
+          lineHeight: 1,
+          fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+        }}
+      >
+        {person.avatar}
+      </span>
     );
   }
   return (

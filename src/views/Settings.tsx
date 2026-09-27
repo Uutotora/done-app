@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Building2,
+  Camera,
   Check,
   CircleAlert,
   Database,
   Download,
   History,
+  ImageUp,
   Monitor,
   Moon,
   RefreshCw,
@@ -28,10 +30,11 @@ import { createSampleData } from '@/lib/seed';
 import { putFileBlob } from '@/lib/storage';
 import { useProjectsList } from '@/lib/selectors';
 import { useActor } from '@/lib/members';
-import type { Lang, ThemePref } from '@/lib/types';
+import { PhotoProblem, photoFromFile } from '@/lib/photo';
+import type { Lang, Person, ThemePref } from '@/lib/types';
 import { cn, downloadBlob } from '@/lib/utils';
 import { Topbar } from '@/components/Topbar';
-import { Button } from '@/components/ui/Button';
+import { Button, Spinner } from '@/components/ui/Button';
 import { Avatar, Field, PageIcon, Segmented, Switch, TextInput } from '@/components/ui/bits';
 import { Dialog, Popover } from '@/components/ui/Overlay';
 import { IconPicker } from '@/components/pickers/IconPicker';
@@ -156,12 +159,52 @@ function Account() {
   const updatePerson = useData((s) => s.updatePerson);
   const email = useAuth((s) => s.user?.email);
   const actor = useActor();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
   if (!me) return null;
+
+  const upload = async (file: File) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const photo = await photoFromFile(file);
+      updatePerson(meId, { photo });
+      toast({ message: t('account.photoSaved'), tone: 'success' });
+    } catch (e) {
+      const reason = e instanceof PhotoProblem ? e.reason : 'unreadable';
+      toast({
+        message: t(reason === 'type' ? 'account.photoType' : reason === 'tooBig' ? 'account.photoTooBig' : 'account.photoUnreadable'),
+        tone: 'error',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = () => {
+    const previous = me.photo;
+    updatePerson(meId, { photo: undefined });
+    toast({
+      message: t('account.photoRemoved'),
+      action: previous ? { label: t('common.undo'), run: () => useData.getState().updatePerson(meId, { photo: previous }) } : undefined,
+    });
+  };
+
   return (
     <>
       <H>{t('account.title')}</H>
       <div className="flex items-center gap-5">
-        <Avatar person={me} size={64} />
+        <PhotoDrop person={me} busy={busy} onPick={() => fileRef.current?.click()} onFile={(f) => void upload(f)} />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) void upload(file);
+          }}
+        />
         <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
           <Field label={t('settings.name')}>
             <TextInput defaultValue={me.name} onBlur={(e) => e.target.value.trim() && updatePerson(meId, { name: e.target.value.trim() })} />
@@ -176,6 +219,18 @@ function Account() {
         </div>
       </div>
       <div className="mt-6">
+        <Row label={t('account.photoLabel')} hint={t('account.photoHint')}>
+          <div className="flex flex-col-reverse items-end gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+            {me.photo && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={remove}>
+                {t('account.photoRemove')}
+              </Button>
+            )}
+            <Button size="sm" icon={<ImageUp size={14} />} loading={busy} onClick={() => fileRef.current?.click()}>
+              {t('account.photoUpload')}
+            </Button>
+          </div>
+        </Row>
         {(email ?? me.email) && (
           <Row label={t('account.email')}>
             <span className="text-[14px] text-fg-2">{email ?? me.email}</span>
@@ -193,12 +248,63 @@ function Account() {
   );
 }
 
+/** The avatar on the account page: click to pick a photo or drop an image onto it. */
+function PhotoDrop({ person, busy, onPick, onFile }: { person: Person; busy: boolean; onPick: () => void; onFile: (file: File) => void }) {
+  const t = useT();
+  const [over, setOver] = useState(false);
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  return (
+    <button
+      type="button"
+      aria-label={t('account.photoChange')}
+      title={t('account.photoChange')}
+      disabled={busy}
+      onClick={onPick}
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) onFile(file);
+      }}
+      className={cn(
+        'group relative shrink-0 rounded-full outline-none ring-offset-2 ring-offset-[var(--bg)] transition-shadow focus-visible:ring-2 focus-visible:ring-accent',
+        over && 'ring-2 ring-accent',
+      )}
+    >
+      <Avatar person={person} size={64} />
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100',
+          (over || busy) && 'opacity-100',
+        )}
+      >
+        {busy ? <Spinner className="h-5 w-5" /> : <Camera size={20} strokeWidth={1.8} />}
+      </span>
+    </button>
+  );
+}
+
 /* ------------------------------- Preferences ------------------------------- */
 
 function Preferences() {
   const t = useT();
   const lang = useLang();
   const theme = useData((s) => s.prefs.theme);
+  const reminders = useData((s) => s.prefs.reminders !== false);
   const setPrefs = useData((s) => s.setPrefs);
   const options: { value: ThemePref; label: string; icon: ReactNode }[] = [
     { value: 'light', label: t('settings.theme.light'), icon: <Sun size={16} /> },
@@ -254,6 +360,9 @@ function Preferences() {
               { value: 'en', label: 'English' },
             ]}
           />
+        </Row>
+        <Row label={t('settings.reminders')} hint={t('settings.remindersHint')}>
+          <Switch checked={reminders} onChange={(v) => setPrefs({ reminders: v })} label={t('settings.reminders')} />
         </Row>
       </div>
     </>

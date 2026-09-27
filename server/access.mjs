@@ -40,6 +40,38 @@ const ITEM_TYPES = ['initiative', 'epic', 'feature', 'task', 'bug', 'milestone']
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'];
 const SPRINT_STATUSES = ['planned', 'active', 'completed'];
 const NOTIFICATION_LIMIT = 400;
+const COMMENT_REF_KINDS = ['item', 'doc'];
+const COMMENT_REF_LIMIT = 50;
+const REACTION_LIMIT = 50;
+const REACTION_KEY = /^(?=.*[\p{Extended_Pictographic}\p{Regional_Indicator}])[\p{Extended_Pictographic}\p{Emoji_Component}]+$/u;
+
+/** A comment reaction is keyed by one emoji (with its modifiers), never by arbitrary text. */
+export const isReactionKey = (key) => typeof key === 'string' && key.length > 0 && key.length <= 16 && REACTION_KEY.test(key);
+const validId = (id) => typeof id === 'string' && id.length > 0 && id.length <= 200 && !BAD_IDS.includes(id);
+/** Links to tasks and pages inside a comment: [{ kind, id, label }]. */
+const validCommentRefs = (refs) =>
+  Array.isArray(refs) &&
+  refs.length <= COMMENT_REF_LIMIT &&
+  refs.every((r) => record(r) && COMMENT_REF_KINDS.includes(r.kind) && validId(r.id) && typeof r.label === 'string' && r.label.length <= 200);
+/** Reactions: { emoji: [person ids] }. */
+const validReactions = (reactions) =>
+  record(reactions) &&
+  Object.keys(reactions).length <= REACTION_LIMIT &&
+  Object.entries(reactions).every(([emoji, ids]) => isReactionKey(emoji) && Array.isArray(ids) && ids.length <= 1000 && ids.every(validId));
+
+/** People whose reaction was added or removed between two versions of a comment. */
+function reactionAuthors(before, after) {
+  const map = (value) => (record(value) ? value : {});
+  const list = (value) => (Array.isArray(value) ? value : []);
+  const [was, now] = [map(before), map(after)];
+  const people = new Set();
+  for (const emoji of new Set([...Object.keys(was), ...Object.keys(now)])) {
+    for (const id of list(was[emoji])) if (!list(now[emoji]).includes(id)) people.add(id);
+    for (const id of list(now[emoji])) if (!list(was[emoji]).includes(id)) people.add(id);
+  }
+  return people;
+}
+const changedFields = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((f) => !same(before[f], after[f]));
 
 /** Workspaces saved by older versions lack collections added later. */
 export function normalizeState(state) {
@@ -116,6 +148,10 @@ export function validateState(state) {
     if (typeof n.recipientId !== 'string' || typeof n.actorId !== 'string' || typeof n.kind !== 'string' || typeof n.targetId !== 'string')
       throw error(400, 'Invalid notification');
   }
+  for (const c of Object.values(state.comments)) {
+    if ((c.refs !== undefined && !validCommentRefs(c.refs)) || (c.reactions !== undefined && !validReactions(c.reactions)))
+      throw error(400, 'Invalid comment');
+  }
 }
 
 /**
@@ -167,10 +203,23 @@ export function applyChanges(current, changes, user, info = {}) {
         }
         const targetOf = (c, state) => (c.targetKind === 'item' ? state.items[c.targetId] : state.docs[c.targetId]);
         if (!isAdmin(user)) {
-          // New comments are posted as yourself, unless a deleted task or page is restored together with its thread.
-          if (!existing && after && after.authorId !== user.id && (targetOf(after, current) || !targetOf(after, next))) denied();
-          // Only the author edits a comment; others may remove it only together with its task or page.
-          if (existing && existing.authorId !== user.id && (after ? !same(existing, after) : !!targetOf(existing, next))) denied();
+          const othersReacted = (from, to) => [...reactionAuthors(from, to)].some((person) => person !== user.id);
+          if (!existing && after) {
+            // New comments are posted as yourself, unless a deleted task or page is restored together with its thread.
+            const restored = !targetOf(after, current) && !!targetOf(after, next);
+            if (!restored && (after.authorId !== user.id || othersReacted(undefined, after.reactions))) denied();
+          }
+          if (existing && after) {
+            // Judge what the save would actually change on the stored comment.
+            const result = mergeFields(existing, before ?? {}, after);
+            const changed = changedFields(existing, result);
+            // A comment stays with its author, and only the author edits it.
+            if (changed.includes('authorId') || (existing.authorId !== user.id && changed.some((f) => f !== 'reactions'))) denied();
+            // Everyone who may comment can react, but only with their own name.
+            if (othersReacted(existing.reactions, result.reactions)) denied();
+          }
+          // Others may remove a comment only together with its task or page.
+          if (existing && !after && existing.authorId !== user.id && !!targetOf(existing, next)) denied();
         }
       }
       if (key === 'notifications') {

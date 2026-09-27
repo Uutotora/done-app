@@ -420,6 +420,11 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
     case 'updateComment':
     case 'deleteComment':
       return s.comments[args[0] as string]?.authorId === user.id || isAdmin(user);
+    case 'toggleReaction': {
+      // Anyone who may comment on the task or page can react, including to their own comments.
+      const comment = s.comments[args[0] as string];
+      return !!comment && canCommentProject(comment.targetKind === 'item' ? itemProject(comment.targetId) : docProject(comment.targetId));
+    }
     case 'updateSprint':
     case 'startSprint':
     case 'completeSprint':

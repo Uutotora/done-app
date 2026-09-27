@@ -13,13 +13,36 @@ export const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b)
 
 const isRecord = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 
+/**
+ * Comment reactions ({ emoji: [person ids in reaction order] }) merged person by person:
+ * what the client removed leaves, what it added joins, and reactions it never saw stay.
+ * Two teammates reacting at the same time keep both reactions. Returns undefined when nothing is left.
+ */
+export function mergeReactions(current, before, after) {
+  const map = (value) => (isRecord(value) ? value : {});
+  const list = (value) => (Array.isArray(value) ? value : []);
+  const [now, was, next] = [map(current), map(before), map(after)];
+  const entries = [];
+  for (const emoji of new Set([...Object.keys(now), ...Object.keys(next), ...Object.keys(was)])) {
+    const removed = new Set(list(was[emoji]).filter((id) => !list(next[emoji]).includes(id)));
+    const merged = [...new Set(list(now[emoji]))].filter((id) => !removed.has(id));
+    for (const id of list(next[emoji])) if (!list(was[emoji]).includes(id) && !merged.includes(id)) merged.push(id);
+    if (merged.length) entries.push([emoji, merged]);
+  }
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+/** Fields merged by their own rule instead of "the client's value wins": (current, before, after) => value, undefined deletes. */
+const FIELD_MERGERS = { reactions: mergeReactions };
+
 /** Three-way merge of one record: fields changed by the client win, everything else keeps the current value. */
 export function mergeFields(current, before, after) {
   const out = { ...current };
   for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (same(before[field], after[field])) continue;
-    if (after[field] === undefined) delete out[field];
-    else out[field] = after[field];
+    const value = Object.hasOwn(FIELD_MERGERS, field) ? FIELD_MERGERS[field](current[field], before[field], after[field]) : after[field];
+    if (value === undefined) delete out[field];
+    else out[field] = value;
   }
   return out;
 }

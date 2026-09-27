@@ -13,6 +13,11 @@ export interface ChangeSet {
 export const COLLECTIONS: readonly string[];
 export function same(a: unknown, b: unknown): boolean;
 export function mergeFields<T extends object>(current: T, before: object, after: object): T;
+export function mergeReactions(
+  current: Record<string, string[]> | undefined,
+  before: Record<string, string[]> | undefined,
+  after: Record<string, string[]> | undefined,
+): Record<string, string[]> | undefined;
 export function diffShared(base: object | null | undefined, next: object): ChangeSet | null;
 export function applyRecord(collection: Record<string, unknown>, id: string, change: RecordChange): void;
 export function applyShared<T extends object>(state: T, changes: ChangeSet): T;

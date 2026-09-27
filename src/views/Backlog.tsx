@@ -720,7 +720,7 @@ function Row({
           />
         </div>
         {/* Title */}
-        <div className="relative flex shrink-0 items-center gap-1 border-r border-line pr-2" style={{ width: TITLE_W, paddingLeft: 6 + depth * 22 }}>
+        <div className="flex shrink-0 items-center gap-1 border-r border-line pr-2" style={{ width: TITLE_W, paddingLeft: 6 + depth * 22 }}>
           {childCount > 0 ? (
             <button onClick={onToggle} className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-3 hover:bg-active">
               <ChevronRight size={13} className={cn('transition-transform duration-150', expanded && 'rotate-90')} />
@@ -759,8 +759,11 @@ function Row({
               >
                 {item.title || t('common.untitled')}
               </span>
-              {childCount > 0 && <span className="shrink-0 text-[12px] text-fg-4 group-hover/row:opacity-0">{childCount}</span>}
-              <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
+              {childCount > 0 && (
+                <span className="shrink-0 text-[12px] text-fg-4 group-hover/row:hidden group-has-[:focus-visible]/row:hidden">{childCount}</span>
+              )}
+              {/* In the flow, not on top: on hover the title gives up room and ends with an ellipsis before the buttons. */}
+              <span className="hidden shrink-0 items-center gap-1 group-hover/row:flex group-has-[:focus-visible]/row:flex has-[[data-state=open]]:flex">
                 <Tooltip content={t('backlog.addSub')}>
                   <button
                     onClick={onAddSub}

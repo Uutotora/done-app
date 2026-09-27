@@ -378,6 +378,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
     case 'deleteProject':
       return isAdmin(user) || s.projects[args[0] as string]?.createdBy === user.id;
     case 'updateProject':
+    case 'setProjectArchived':
     case 'moveProject':
     case 'setMap':
     case 'createSprint':

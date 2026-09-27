@@ -1,6 +1,7 @@
 import { Command } from 'cmdk';
 import * as RDialog from '@radix-ui/react-dialog';
 import {
+  Archive,
   CalendarDays,
   ChartGantt,
   FilePlus,
@@ -29,6 +30,8 @@ import { PageIcon, Kbd } from './ui/bits';
 import { StatusIcon, TypeIcon } from './pickers/icons';
 import { NodeIcon } from './files/NodeIcon';
 import { canCreateProjects } from '@/lib/auth';
+import { isArchivedProject, refInArchive } from '@/lib/archive';
+import { openProjectArchive } from './ProjectArchive';
 
 export function CommandPalette() {
   const t = useT();
@@ -57,33 +60,43 @@ export function CommandPalette() {
 
   const results = useMemo(() => {
     if (!q.trim()) return null;
-    const lim = <T,>(arr: T[], n: number) => arr.slice(0, n);
+    // Archived projects and their work are still found, listed after everything in use (sort is stable).
+    const lim = <T,>(arr: T[], n: number, projectOf: (x: T) => string | undefined) =>
+      arr.sort((a, b) => Number(isArchivedProject(projects, projectOf(a))) - Number(isArchivedProject(projects, projectOf(b)))).slice(0, n);
     return {
       projects: lim(
         Object.values(projects).filter((p) => matches(`${p.name} ${p.summary ?? ''}`, q)),
         5,
+        (p) => p.id,
       ),
       items: lim(
         Object.values(items).filter((i) => matches(`${i.title} ${i.tags.join(' ')} ${i.plane?.key ?? ''}`, q)),
         8,
+        (i) => i.projectId,
       ),
       files: lim(
         Object.values(files).filter((f) => matches(`${f.name} ${f.url ?? ''} ${f.note ?? ''}`, q)),
         6,
+        (f) => f.projectId,
       ),
       docs: lim(
         Object.values(docs).filter((d) => matches(`${d.title} ${blocksToText(d.content, 600)}`, q)),
         5,
+        (d) => d.projectId,
       ),
       sprints: lim(
         Object.values(sprints).filter((sp) => sp.status !== 'completed' && projects[sp.projectId] && matches(`${sp.name} ${sp.goal ?? ''}`, q)),
         4,
+        (sp) => sp.projectId,
       ),
     };
   }, [q, projects, items, files, docs, sprints]);
+  const archivedHint = (projectId: string | undefined, prefix = '') =>
+    isArchivedProject(projects, projectId) ? <span className="text-fg-4">{`${prefix}${t('archive.badge')}`}</span> : undefined;
   const activeSprints = Object.values(sprints).filter((sp) => sp.status === 'active' && projects[sp.projectId] && !projects[sp.projectId].archived);
 
   const recentEntries = recent
+    .filter((r) => !refInArchive(r, { projects, docs }))
     .map((r) => {
       if (r.kind === 'project' && projects[r.id]) return { key: r.id, label: projects[r.id].name, icon: projects[r.id].icon, to: `/p/${r.id}` };
       if (r.kind === 'doc' && docs[r.id])
@@ -124,9 +137,10 @@ export function CommandPalette() {
                             key={p.id}
                             value={`p-${p.id}`}
                             icon={<PageIcon icon={p.icon} size={17} />}
+                            hint={archivedHint(p.id)}
                             onSelect={() => run(() => navigate(`/p/${p.id}/overview`))}
                           >
-                            {p.name}
+                            {p.name || t('project.untitled')}
                           </Row>
                         ))}
                       </Command.Group>
@@ -142,6 +156,7 @@ export function CommandPalette() {
                               <span className="flex items-center gap-1.5">
                                 <StatusIcon status={i.status} size={12} />
                                 {projects[i.projectId]?.name}
+                                {archivedHint(i.projectId, '· ')}
                               </span>
                             }
                             onSelect={() => run(() => ui.openPeek(i.id))}
@@ -158,7 +173,7 @@ export function CommandPalette() {
                             key={f.id}
                             value={`f-${f.id}`}
                             icon={<NodeIcon node={f} size={16} />}
-                            hint={f.kind === 'link' ? f.url?.replace(/^https?:\/\//, '').slice(0, 40) : undefined}
+                            hint={archivedHint(f.projectId) ?? (f.kind === 'link' ? f.url?.replace(/^https?:\/\//, '').slice(0, 40) : undefined)}
                             onSelect={() =>
                               run(() => {
                                 if (f.kind === 'link' && f.url) window.open(f.url, '_blank', 'noopener');
@@ -181,7 +196,11 @@ export function CommandPalette() {
                             key={sp.id}
                             value={`s-${sp.id}`}
                             icon={<IterationCw size={15} />}
-                            hint={projects[sp.projectId]?.name}
+                            hint={
+                              <>
+                                {projects[sp.projectId]?.name} {archivedHint(sp.projectId, '· ')}
+                              </>
+                            }
                             onSelect={() => run(() => navigate(`/p/${sp.projectId}/sprints`))}
                           >
                             {sp.name}
@@ -196,6 +215,7 @@ export function CommandPalette() {
                             key={d.id}
                             value={`d-${d.id}`}
                             icon={d.icon ? <PageIcon icon={d.icon} size={17} /> : <FileText size={16} />}
+                            hint={archivedHint(d.projectId)}
                             onSelect={() => run(() => navigate(`/docs/${d.id}`))}
                           >
                             {d.title || t('common.untitled')}
@@ -255,6 +275,7 @@ export function CommandPalette() {
                       sc: `${modKey()}\\`,
                       fn: () => setPrefs({ sidebarCollapsed: !useData.getState().prefs.sidebarCollapsed }),
                     },
+                    { k: 'archive', icon: <Archive size={16} />, label: t('archive.title'), fn: openProjectArchive },
                     { k: 'shortcuts', icon: <Keyboard size={16} />, label: t('cmd.shortcuts'), sc: '?', fn: () => ui.setShortcuts(true) },
                   ].filter((a) => !q || matches(a.label, q));
                   return actions.length ? (
@@ -282,7 +303,7 @@ export function CommandPalette() {
                     { k: 'cal', icon: <CalendarDays size={16} />, label: t('nav.calendar'), to: '/calendar', sc: 'G C' },
                     { k: 'road', icon: <ChartGantt size={16} />, label: t('nav.roadmap'), to: '/roadmap', sc: 'G R' },
                     { k: 'files', icon: <FolderOpen size={16} />, label: t('nav.files'), to: '/files', sc: 'G F' },
-                    { k: 'set', icon: <Settings size={16} />, label: t('nav.settings'), to: '/settings' },
+                    { k: 'set', icon: <Settings size={16} />, label: t('nav.settings'), to: '/settings', sc: 'G S' },
                   ].filter((a) => !q || matches(a.label, q));
                   return nav.length ? (
                     <Command.Group heading={t('cmd.navigation')}>

@@ -107,6 +107,8 @@ export interface Actions {
   moveProject: (id: ID, groupId: ID | undefined, beforeId?: ID) => void;
   duplicateProject: (id: ID) => ID | undefined;
   deleteProject: (id: ID) => Snapshot;
+  /** Moves a project to the archive (hidden from day-to-day lists) or brings it back. */
+  setProjectArchived: (id: ID, archived: boolean) => void;
 
   createItem: (item: NewItem) => ID;
   updateItem: (id: ID, patch: Partial<Item>) => void;
@@ -395,6 +397,9 @@ export const useData = create<Store>()(
           ...cloneable(src),
           name: `${src.name} (${s.prefs.lang === 'ru' ? 'копия' : 'copy'})`,
           plane: undefined,
+          // A copy starts in use even when the original sits in the archive.
+          archived: undefined,
+          archivedAt: undefined,
         });
         // Copy items preserving the hierarchy.
         const idMap = new Map<ID, ID>();
@@ -456,6 +461,21 @@ export const useData = create<Store>()(
         });
         return snap;
       },
+      setProjectArchived: (id, archived) =>
+        set((s) => {
+          const prev = s.projects[id];
+          if (!prev || !!prev.archived === archived) return {};
+          const ts = nowIso();
+          const next: Project = { ...prev, updatedAt: ts };
+          if (archived) {
+            next.archived = true;
+            next.archivedAt = ts;
+          } else {
+            delete next.archived;
+            delete next.archivedAt;
+          }
+          return { projects: { ...s.projects, [id]: next } };
+        }),
 
       createItem: (input) => {
         const id = uid('it');

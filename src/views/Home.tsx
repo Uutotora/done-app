@@ -7,6 +7,7 @@ import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { dateLocale, useLang, useT } from '@/lib/i18n';
 import { isClosed, progressOf, refPath, refTitle, useMe, useProjectsList } from '@/lib/selectors';
+import { isArchivedProject, refInArchive } from '@/lib/archive';
 import { daysFromToday, formatRange, formatShortDate, timeAgo, todayISO, toISODate } from '@/lib/dates';
 import { sprintItems, sprintStats } from '@/lib/sprints';
 import { PROJECT_STATUS_COLOR } from '@/lib/constants';
@@ -48,11 +49,13 @@ export function Home() {
   const recentFiles = useMemo(
     () =>
       Object.values(files)
-        .filter((f) => f.kind !== 'folder')
+        .filter((f) => f.kind !== 'folder' && !isArchivedProject(projectsById, f.projectId))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, 6),
-    [files],
+    [files, projectsById],
   );
+  const docs = useData((s) => s.docs);
+  const jumpBack = useMemo(() => recent.filter((r) => !refInArchive(r, { projects: projectsById, docs })).slice(0, 8), [recent, projectsById, docs]);
 
   const hour = new Date().getHours();
   const greeting = t(hour < 5 ? 'home.night' : hour < 12 ? 'home.morning' : hour < 18 ? 'home.day' : 'home.evening');
@@ -61,25 +64,39 @@ export function Home() {
   const focus = useMemo(
     () =>
       Object.values(items)
-        .filter((i) => i.assigneeId === me?.id && !isClosed(i) && i.type !== 'initiative' && i.type !== 'milestone')
+        .filter(
+          (i) =>
+            i.assigneeId === me?.id &&
+            !isClosed(i) &&
+            i.type !== 'initiative' &&
+            i.type !== 'milestone' &&
+            !isArchivedProject(projectsById, i.projectId),
+        )
         .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'))
         .slice(0, 8),
-    [items, me?.id],
+    [items, me?.id, projectsById],
   );
   const doneToday = useMemo(
     () =>
       Object.values(items).filter(
-        (i) => i.assigneeId === me?.id && i.status === 'done' && i.completedAt && toISODate(new Date(i.completedAt)) === todayISO(),
+        (i) =>
+          i.assigneeId === me?.id &&
+          i.status === 'done' &&
+          i.completedAt &&
+          toISODate(new Date(i.completedAt)) === todayISO() &&
+          !isArchivedProject(projectsById, i.projectId),
       ),
-    [items, me?.id],
+    [items, me?.id, projectsById],
   );
   const milestones = useMemo(
     () =>
       Object.values(items)
-        .filter((i) => i.type === 'milestone' && i.dueDate && i.dueDate >= todayISO() && !isClosed(i))
+        .filter(
+          (i) => i.type === 'milestone' && i.dueDate && i.dueDate >= todayISO() && !isClosed(i) && !isArchivedProject(projectsById, i.projectId),
+        )
         .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!))
         .slice(0, 5),
-    [items],
+    [items, projectsById],
   );
   const allItems = useMemo(() => Object.values(items), [items]);
 
@@ -281,11 +298,11 @@ export function Home() {
         </motion.section>
 
         {/* Jump back in */}
-        {recent.length > 0 && (
+        {jumpBack.length > 0 && (
           <motion.section {...fadeUp(7)} className="mt-10">
             <SectionTitle>{t('home.jumpBack')}</SectionTitle>
             <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
-              {recent.slice(0, 8).map((r) => {
+              {jumpBack.map((r) => {
                 const info = refTitle(r);
                 if (!info) return null;
                 return (

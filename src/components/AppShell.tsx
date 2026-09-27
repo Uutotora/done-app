@@ -5,7 +5,8 @@ import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { useHotkey, useIsDark } from '@/lib/hooks';
 import { reportPresence, useAuth } from '@/lib/auth';
-import { notificationHeadline, notificationTarget, unreadCount } from '@/lib/inbox';
+import { notificationHeadline, notificationTarget } from '@/lib/inbox';
+import { useDocumentTitle } from '@/lib/documentTitle';
 import { toast } from '@/lib/ui';
 import { isEditableTarget } from '@/lib/utils';
 import { SyncNotice } from './AccountStatus';
@@ -15,6 +16,7 @@ import { Celebration } from './Celebration';
 import { CommandPalette } from './CommandPalette';
 import { CreateItemDialog } from './CreateItemDialog';
 import { ShortcutsDialog } from './ShortcutsDialog';
+import { ProjectArchiveDialog } from './ProjectArchive';
 import { SidePeek } from './SidePeek';
 import { LinkDialog } from './files/LinkDialog';
 import { FilePreview } from './files/FilePreview';
@@ -66,6 +68,7 @@ export function AppShell() {
   useGoTo();
 
   useInboxSignals();
+  useDocumentTitle();
 
   // Page-level transitions keyed by the section, so switching project tabs feels calm.
   const sectionKey = location.pathname.split('/').slice(0, 3).join('/');
@@ -88,6 +91,7 @@ export function AppShell() {
       <CommandPalette />
       <CreateItemDialog />
       <ShortcutsDialog />
+      <ProjectArchiveDialog />
       <LinkDialog />
       <FilePreview />
       <Toaster />
@@ -96,13 +100,9 @@ export function AppShell() {
   );
 }
 
-/** Unread count in the tab title, and a toast when a teammate's update arrives live. */
+/** A toast when a teammate's update arrives live. The unread count in the tab title comes from useDocumentTitle. */
 function useInboxSignals() {
   const navigate = useNavigate();
-  const unread = useData(unreadCount);
-  useEffect(() => {
-    document.title = unread ? `(${unread}) Done` : 'Done';
-  }, [unread]);
   useEffect(() => {
     const mine = (s: ReturnType<typeof useData.getState>) =>
       Object.values(s.notifications).filter((n) => n.recipientId === s.meId && !n.readAt && !n.archivedAt);

@@ -71,7 +71,7 @@ export const ItemCard = forwardRef<
           />
         </div>
         {show.project && project && (
-          <div className="mb-1 flex items-center gap-1 text-[11.5px] text-fg-3">
+          <div className="mb-1 flex items-center gap-1 pr-5 text-[11.5px] text-fg-3">
             <PageIcon icon={project.icon} size={12} />
             <span className="truncate">{project.name}</span>
           </div>

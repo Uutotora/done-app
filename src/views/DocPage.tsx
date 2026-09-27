@@ -1,5 +1,18 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Copy, FileText, FolderInput, Link2, MessageSquare, MoreHorizontal, Plus, SmilePlus, Trash2 } from 'lucide-react';
+import {
+  Copy,
+  Download,
+  FileDown,
+  FileText,
+  FolderInput,
+  Link2,
+  MessageSquare,
+  MoreHorizontal,
+  Plus,
+  Printer,
+  SmilePlus,
+  Trash2,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useData } from '@/lib/store';
@@ -7,6 +20,7 @@ import { toast } from '@/lib/ui';
 import { useLang, useT } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
 import { deleteDocWithUndo } from '@/lib/actions';
+import { exportDocMarkdown, printDoc } from '@/lib/docExport';
 import { useProjectsList } from '@/lib/selectors';
 import { blocksToText, cn } from '@/lib/utils';
 import type { Doc, DocFont, ID } from '@/lib/types';
@@ -219,6 +233,26 @@ function PageMenu({ doc, words }: { doc: Doc; words: number }) {
       onSelect: () => moveToProject(p.id),
     })),
   ];
+  const runExport = (task: (latest: Doc) => Promise<void>) => {
+    setOpen(false);
+    // The store copy is current: the editor saves while typing.
+    const latest = useData.getState().docs[doc.id] ?? doc;
+    task(latest).catch(() => toast({ message: t('export.failed'), tone: 'error' }));
+  };
+  const exportEntries: MenuEntry[] = [
+    {
+      key: 'md',
+      icon: <FileDown size={15} />,
+      label: t('docs.export.markdown'),
+      onSelect: () => runExport((d) => exportDocMarkdown(d, t('common.untitled'))),
+    },
+    {
+      key: 'pdf',
+      icon: <Printer size={15} />,
+      label: t('docs.export.pdf'),
+      onSelect: () => runExport((d) => printDoc(d, lang, t('common.untitled'))),
+    },
+  ];
   return (
     <Popover
       open={open}
@@ -282,6 +316,12 @@ function PageMenu({ doc, words }: { doc: Doc; words: number }) {
           align="start"
           entries={moveEntries}
           trigger={<MenuButton icon={<FolderInput size={15} />}>{t('docs.moveTo')}</MenuButton>}
+        />
+        <EntriesMenu
+          side="left"
+          align="start"
+          entries={exportEntries}
+          trigger={<MenuButton icon={<Download size={15} />}>{t('docs.export')}</MenuButton>}
         />
         <MenuButton
           icon={<Trash2 size={15} />}

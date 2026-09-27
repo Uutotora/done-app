@@ -1,4 +1,4 @@
-import { CheckCheck, ChevronDown, FolderOpen, ListTodo, Plus, Search, X } from 'lucide-react';
+import { CheckCheck, ChevronDown, FolderOpen, ListTodo, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
@@ -16,6 +16,11 @@ import { PersonPicker, PriorityPicker } from '@/components/pickers/Pickers';
 import { DatePicker } from '@/components/pickers/DatePicker';
 import { RecurrenceMark } from '@/components/pickers/RecurrencePicker';
 import { EntriesMenu } from '@/components/ui/Overlay';
+import { IconButton } from '@/components/ui/Button';
+import { csvMenuEntry, downloadItemsCsv, itemExportContext } from '@/components/ExportMenu';
+import { MY_WORK_COLUMNS } from '@/lib/itemExport';
+
+const WORK_VIEWS = ['active', 'overdue', 'week', 'blocked', 'unassigned', 'completed'] as const;
 
 export function MyWork() {
   const t = useT();
@@ -66,6 +71,21 @@ export function MyWork() {
       return true;
     });
   const items = sortWork(filtered(view));
+  const exportCsv = () => {
+    const ctx = itemExportContext();
+    // Same order as on screen: bucket by bucket, the bucket as the first field.
+    const rows = WORK_BUCKETS.flatMap((bucket) =>
+      items.filter((i) => workBucket(i, today) === bucket).map((item) => ({ item, group: t(`work.bucket.${bucket}`) })),
+    );
+    const name = [
+      scope === 'team' ? t('work.teamExport') : t('nav.myWork'),
+      view !== 'active' && (WORK_VIEWS as readonly string[]).includes(view) ? t(`work.${view as (typeof WORK_VIEWS)[number]}`) : '',
+      projectId && projects[projectId] ? projects[projectId].name : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    downloadItemsCsv(rows, MY_WORK_COLUMNS, ctx, name, { withGroup: true });
+  };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Topbar crumbs={[{ label: t('nav.myWork'), icon: 'icon:list-todo:gray' }]} />
@@ -150,9 +170,18 @@ export function MyWork() {
               <X size={12} />
             </button>
           )}
+          <EntriesMenu
+            align="end"
+            entries={[csvMenuEntry(exportCsv, t)]}
+            trigger={
+              <IconButton size="md" label={t('common.more')} className="data-[state=open]:bg-hover">
+                <MoreHorizontal size={16} />
+              </IconButton>
+            }
+          />
         </div>
         <div className="no-scrollbar flex gap-4 overflow-x-auto border-b border-line">
-          {(['active', 'overdue', 'week', 'blocked', 'unassigned', 'completed'] as const).map((v) => (
+          {WORK_VIEWS.map((v) => (
             <button
               key={v}
               aria-pressed={view === v}

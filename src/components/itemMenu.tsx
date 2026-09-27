@@ -1,10 +1,11 @@
-import { Copy, ExternalLink, Flag, Link2, CircleDot, Send, Trash2, User, Compass } from 'lucide-react';
+import { Copy, ExternalLink, Flag, Link2, CircleDot, Send, Trash2, User, Compass, LayoutTemplate } from 'lucide-react';
 import { useData } from '@/lib/store';
 import { toast, useUI } from '@/lib/ui';
 import { translate } from '@/lib/i18n';
 import { HORIZONS, HORIZON_COLOR, PRIORITIES, STATUSES } from '@/lib/constants';
 import { deleteItemsWithUndo, setItemStatus } from '@/lib/actions';
 import { planeReady, pushItemsToPlane } from '@/lib/plane';
+import { openTemplatesDialog } from './templates/TemplatesDialog';
 import type { Item } from '@/lib/types';
 import type { MenuEntry } from './ui/Overlay';
 import { Avatar } from './ui/bits';
@@ -99,6 +100,20 @@ export function itemMenuEntries(item: Item): MenuEntry[] {
       onSelect: () => {
         void navigator.clipboard?.writeText(`${window.location.origin}/items/${item.id}`);
         toast({ message: t('common.copied') });
+      },
+    },
+    {
+      key: 'saveAsTemplate',
+      icon: <LayoutTemplate size={15} />,
+      label: t('template.saveAs'),
+      onSelect: () => {
+        const id = useData.getState().saveItemAsTemplate(item.id, item.title || t('template.untitled'));
+        if (id) {
+          toast({
+            message: t('template.saved', { name: item.title || t('template.untitled') }),
+            action: { label: t('template.manage'), run: () => openTemplatesDialog(item.projectId) },
+          });
+        }
       },
     },
   ];

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronsRight, Link2, Maximize2, MoreHorizontal, Trash2 } from 'lucide-react';
+import { ChevronsRight, FileDown, Link2, Maximize2, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { useData } from '@/lib/store';
@@ -10,6 +10,7 @@ import { IconButton } from './ui/Button';
 import { Menu, MenuItem, MenuSeparator, Tooltip } from './ui/Overlay';
 import { PageIcon } from './ui/bits';
 import { ItemDetail } from './ItemDetail';
+import { exportItemAsMarkdown } from './ExportMenu';
 import { TypeIcon } from './pickers/icons';
 
 /** Notion's "side peek": the item slides over the current view without losing context. */
@@ -115,6 +116,9 @@ export function SidePeek() {
                 }}
               >
                 {t('item.copyId')}
+              </MenuItem>
+              <MenuItem icon={<FileDown size={15} />} onSelect={() => exportItemAsMarkdown(item.id)}>
+                {t('item.exportMarkdown')}
               </MenuItem>
               <MenuSeparator />
               <MenuItem danger icon={<Trash2 size={15} />} onSelect={() => deleteItemsWithUndo([item.id])}>

@@ -18,6 +18,18 @@ export const B = {
   muted: (text: string) => ({ id: uid(), type: 'paragraph', content: [{ type: 'text', text, styles: { textColor: 'gray' } }] }),
 };
 
+/** Copy of a document with every checklist item unticked, for a repeat of a task or a template. */
+export function uncheckBlocks(blocks: unknown[]): unknown[] {
+  return blocks.map((raw) => {
+    if (!raw || typeof raw !== 'object') return raw;
+    const block = raw as { type?: unknown; props?: Record<string, unknown>; children?: unknown };
+    let next = block;
+    if (block.type === 'checkListItem' && block.props?.checked) next = { ...next, props: { ...block.props, checked: false } };
+    if (Array.isArray(block.children) && block.children.length) next = { ...next, children: uncheckBlocks(block.children) };
+    return next;
+  });
+}
+
 export type TemplateId = 'prd' | 'brief' | 'retro' | 'release' | 'oneOnOne' | 'decision';
 
 export interface Template {

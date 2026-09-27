@@ -37,6 +37,16 @@ test('welcome, registration draft, durable account, project and viewer access', 
   const savedTask = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
   await page.getByPlaceholder('Что нужно сделать?').press('Enter');
   await savedTask;
+
+  // Losing the network shows the calm offline banner instead of an error, and edits still save on their own once it returns.
+  await page.context().setOffline(true);
+  await page.keyboard.press('c');
+  await page.getByPlaceholder('Что нужно сделать?').fill('Офлайн-задача');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Нет подключения', { exact: false }).first()).toBeVisible({ timeout: 15000 });
+  await page.context().setOffline(false);
+  await expect(page.getByText('Нет подключения', { exact: false })).toHaveCount(0, { timeout: 15000 });
+
   await page.getByRole('link', { name: 'Мои задачи', exact: true }).click();
   await page.getByRole('button', { name: 'Вся команда', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Проверить сохранение', exact: true })).toBeVisible();

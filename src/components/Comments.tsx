@@ -6,12 +6,14 @@ import { useLang, useT } from '@/lib/i18n';
 import { timeAgo } from '@/lib/dates';
 import { useMe } from '@/lib/selectors';
 import { isAdmin, useAuth, useProjectLevel } from '@/lib/auth';
-import type { Comment, CommentTarget, ID } from '@/lib/types';
+import { refsInText } from '@/lib/comments';
+import type { Comment, CommentRef, CommentTarget, ID } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { Avatar, AutoTextarea } from './ui/bits';
+import { Avatar } from './ui/bits';
 import { EntriesMenu } from './ui/Overlay';
 import { IconButton } from './ui/Button';
 import { MentionText, MentionTextarea, mentionsInText } from './Mentions';
+import { AddReactionButton, ReactionPicker, Reactions } from './Reactions';
 
 /** Notion-style comment thread under the page properties. */
 export function Comments({ targetKind, targetId }: { targetKind: CommentTarget; targetId: ID }) {
@@ -25,30 +27,57 @@ export function Comments({ targetKind, targetId }: { targetKind: CommentTarget; 
   );
   const projectId = useData((s) => (targetKind === 'item' ? s.items[targetId]?.projectId : s.docs[targetId]?.projectId));
   const level = useProjectLevel(projectId);
+  // Whoever may comment may also react, including to their own comments.
+  const canComment = !!level && level !== 'viewer';
   return (
     <div className="space-y-1">
       <AnimatePresence initial={false}>
         {comments.map((c) => (
-          <CommentView key={c.id} comment={c} />
+          <CommentView key={c.id} comment={c} canReact={canComment} projectId={projectId} />
         ))}
       </AnimatePresence>
-      {level && level !== 'viewer' && <Composer targetKind={targetKind} targetId={targetId} />}
+      {canComment && <Composer targetKind={targetKind} targetId={targetId} projectId={projectId} />}
     </div>
   );
 }
 
-function CommentView({ comment }: { comment: Comment }) {
+function CommentView({ comment, canReact, projectId }: { comment: Comment; canReact: boolean; projectId?: ID }) {
   const t = useT();
   const lang = useLang();
   const author = useData((s) => s.people[comment.authorId]);
   const meId = useData((s) => s.meId);
   const update = useData((s) => s.updateComment);
   const remove = useData((s) => s.deleteComment);
+  const react = useData((s) => s.toggleReaction);
   // Admins may remove anyone's comment; only the author edits it.
   const moderator = useAuth((s) => s.mode === 'signedIn' && isAdmin(s.user));
   const mine = comment.authorId === meId;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.text);
+  const [draftMentions, setDraftMentions] = useState<ID[]>([]);
+  const [draftRefs, setDraftRefs] = useState<CommentRef[]>([]);
+  // Enter and blur both save: the ref makes sure one edit is saved once.
+  const open = useRef(false);
+  const startEditing = () => {
+    setDraft(comment.text);
+    setDraftMentions(comment.mentions ?? []);
+    setDraftRefs(comment.refs ?? []);
+    open.current = true;
+    setEditing(true);
+  };
+  const cancel = () => {
+    open.current = false;
+    setEditing(false);
+  };
+  const save = () => {
+    if (!open.current) return;
+    cancel();
+    const v = draft.trim();
+    if (!v) return;
+    const refs = refsInText(v, draftRefs);
+    if (v === comment.text && JSON.stringify(refs) === JSON.stringify(comment.refs ?? [])) return;
+    update(comment.id, v, { mentions: mentionsInText(v, draftMentions, useData.getState().people), refs });
+  };
   return (
     <motion.div
       layout
@@ -67,77 +96,82 @@ function CommentView({ comment }: { comment: Comment }) {
           </span>
         </div>
         {editing ? (
-          <div className="mt-1">
-            <AutoTextarea
+          <div className="mt-1 rounded-md bg-bg px-2 py-1 shadow-[0_0_0_2px_var(--accent-soft)]">
+            <MentionTextarea
               autoFocus
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => {
-                if (draft.trim() && draft !== comment.text) update(comment.id, draft.trim());
-                setEditing(false);
+              onValueChange={setDraft}
+              mentions={draftMentions}
+              onMentionsChange={setDraftMentions}
+              refs={draftRefs}
+              onRefsChange={setDraftRefs}
+              projectId={projectId}
+              onSubmit={save}
+              onBlur={save}
+              onFocus={(e) => {
+                const end = e.currentTarget.value.length;
+                e.currentTarget.setSelectionRange(end, end);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.stopPropagation();
-                  setDraft(comment.text);
-                  setEditing(false);
+                  cancel();
                 }
               }}
-              className="rounded-md bg-bg px-2 py-1 text-[14px] shadow-[0_0_0_2px_var(--accent-soft)]"
+              aria-label={t('comments.edit')}
+              className="text-[14px] leading-relaxed"
             />
           </div>
         ) : (
           <div className="whitespace-pre-wrap break-words text-[14px] leading-relaxed">
-            <MentionText text={comment.text} mentions={comment.mentions} />
+            <MentionText text={comment.text} mentions={comment.mentions} refs={comment.refs} />
           </div>
         )}
+        {!editing && <Reactions comment={comment} canReact={canReact} />}
       </div>
-      {(mine || moderator) && !editing && (
-        <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover/comment:opacity-100 has-[[data-state=open]]:opacity-100">
-          <EntriesMenu
-            align="end"
-            trigger={
-              <IconButton size="sm" label={t('common.more')} className="bg-elevated shadow-sm">
-                <MoreHorizontal size={14} />
-              </IconButton>
-            }
-            entries={[
-              ...(!mine
-                ? []
-                : [
-                    {
-                      key: 'edit',
-                      icon: <PenLine size={15} />,
-                      label: t('comments.edit'),
-                      onSelect: () => {
-                        setDraft(comment.text);
-                        setEditing(true);
-                      },
-                    },
-                  ]),
-              { key: 'del', icon: <Trash2 size={15} />, label: t('comments.delete'), danger: true, onSelect: () => remove(comment.id) },
-            ]}
-          />
+      {(canReact || mine || moderator) && !editing && (
+        <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-md bg-elevated opacity-0 shadow-sm transition-opacity focus-within:opacity-100 group-hover/comment:opacity-100 has-[[data-state=open]]:opacity-100">
+          {canReact && (
+            <ReactionPicker onPick={(emoji) => react(comment.id, emoji)}>
+              <AddReactionButton label={t('comments.addReaction')} className="h-6 w-6 rounded-[5px]" />
+            </ReactionPicker>
+          )}
+          {(mine || moderator) && (
+            <EntriesMenu
+              align="end"
+              trigger={
+                <IconButton size="sm" label={t('common.more')}>
+                  <MoreHorizontal size={14} />
+                </IconButton>
+              }
+              entries={[
+                ...(!mine ? [] : [{ key: 'edit', icon: <PenLine size={15} />, label: t('comments.edit'), onSelect: startEditing }]),
+                { key: 'del', icon: <Trash2 size={15} />, label: t('comments.delete'), danger: true, onSelect: () => remove(comment.id) },
+              ]}
+            />
+          )}
         </div>
       )}
     </motion.div>
   );
 }
 
-function Composer({ targetKind, targetId }: { targetKind: CommentTarget; targetId: ID }) {
+function Composer({ targetKind, targetId, projectId }: { targetKind: CommentTarget; targetId: ID; projectId?: ID }) {
   const t = useT();
   const me = useMe();
   const add = useData((s) => s.addComment);
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<ID[]>([]);
+  const [refs, setRefs] = useState<CommentRef[]>([]);
   const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const send = () => {
     const v = text.trim();
     if (!v) return;
-    add(targetKind, targetId, v, mentionsInText(v, mentions, useData.getState().people));
+    add(targetKind, targetId, v, mentionsInText(v, mentions, useData.getState().people), refs);
     setText('');
     setMentions([]);
+    setRefs([]);
   };
   const insertAt = () => {
     const el = ref.current;
@@ -161,6 +195,9 @@ function Composer({ targetKind, targetId }: { targetKind: CommentTarget; targetI
         onValueChange={setText}
         mentions={mentions}
         onMentionsChange={setMentions}
+        refs={refs}
+        onRefsChange={setRefs}
+        projectId={projectId}
         onSubmit={send}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -169,7 +206,7 @@ function Composer({ targetKind, targetId }: { targetKind: CommentTarget; targetI
       />
       <IconButton
         size="sm"
-        label={t('comments.mentionHint')}
+        label={t('comments.linkHint')}
         onMouseDown={(e) => e.preventDefault()}
         onClick={insertAt}
         className={cn('mt-1 transition-opacity', focused || text ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100')}

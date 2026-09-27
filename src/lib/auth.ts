@@ -5,7 +5,20 @@ import { setMutationPolicy } from './mutationPolicy';
 import { toast } from './ui';
 import { usePresence, type Peer } from './presence';
 import { applyShared, diffShared } from '../../server/merge.mjs';
+import { applyDelta, type RevisionEvent } from './liveDelta';
 import type { DataState } from './types';
+import { translate, type TKey } from './i18n';
+import {
+  classifyFailure,
+  deletePendingEntries,
+  holdPendingLock,
+  loadRestorable,
+  pendingKey,
+  replayPending,
+  retryableError,
+  retryDelay,
+  savePendingEntry,
+} from './offline';
 
 /** Workspace roles, strongest first. "owner" is shown as super admin. */
 export type AccessRole = 'owner' | 'admin' | 'editor' | 'viewer';
@@ -26,16 +39,19 @@ export interface AuthUser {
   createdAt?: string;
   lastSeen?: number | null;
 }
-type SyncStatus = 'saved' | 'saving' | 'error';
+/** "offline" means the server cannot be reached right now; edits wait in this browser. */
+export type SyncStatus = 'saved' | 'saving' | 'offline' | 'error';
 interface AuthState {
   mode: 'loading' | 'signedOut' | 'local' | 'signedIn';
   user: AuthUser | null;
   setup: boolean;
+  /** The server sends email (invitations, password reset links). */
+  mail: boolean;
   error: string;
   sync: SyncStatus;
   syncError: string;
 }
-export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, error: '', sync: 'saved', syncError: '' }));
+export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, mail: false, error: '', sync: 'saved', syncError: '' }));
 export const isAdmin = (user: AuthUser | null) => !!user && ['owner', 'admin'].includes(user.role);
 
 const LEVELS: AccessLevel[] = ['viewer', 'commenter', 'editor', 'full'];
@@ -67,15 +83,27 @@ export const useCanCreateProjects = () => useAuth((s) => canCreateProjects(s));
 /** Identifies this browser tab so it can ignore live events about its own saves. */
 const TAB_ID = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Math.random());
 
+/**
+ * Calls the Done API. Failed requests throw an Error with `network: true` when no answer came, or
+ * with `status` and `json` (false for a non-JSON answer such as a proxy error page); see offline.ts.
+ */
 export async function api<T = Record<string, unknown>>(path: string, method = 'GET', data?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json', 'x-done-client': 'web', 'x-done-tab': TAB_ID },
-    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-  });
-  const result = await response.json();
-  if (!response.ok) throw Object.assign(new Error(result.error || 'Request failed'), { status: response.status });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'x-done-client': 'web', 'x-done-tab': TAB_ID },
+      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+    });
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { network: true });
+  }
+  const result = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
+  if (!response.ok || !result || typeof result !== 'object') {
+    const message = typeof result?.error === 'string' ? result.error : `Request failed (${response.status})`;
+    throw Object.assign(new Error(message), { status: response.status, json: !!result && typeof result === 'object' });
+  }
   return result as T;
 }
 
@@ -93,6 +121,13 @@ let base: Shared | null = null;
 let applying = false;
 let queue: Promise<unknown> = Promise.resolve();
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
+let retryAttempt = 0;
+/** Edits were made while the server could not be reached: say so once they are saved. */
+let unsavedOffline = false;
+/** The live event stream ended for good (a proxy error page); it is reopened once the server answers. */
+let eventsClosed = false;
+let eventsRevivedAt = 0;
+const tr = (key: TKey) => translate(useData.getState().prefs.lang, key);
 
 /** Runs sync steps one at a time so a pull never interleaves with a save. */
 function exclusive<T>(task: () => Promise<T>): Promise<T> {
@@ -126,6 +161,7 @@ function applyRemote(data: Partial<DataState>, user: AuthUser, rev: number, keep
 
 async function pull(keepLocal = true, force = false) {
   const result = await api<{ data: DataState; revision: number; user: AuthUser }>('/api/workspace');
+  connected();
   if (force || !keepLocal || result.revision !== revision || !base) applyRemote(result.data, result.user, result.revision, keepLocal);
   else useAuth.setState({ user: result.user });
 }
@@ -135,6 +171,8 @@ export function refreshWorkspace(discardLocal = false): Promise<void> {
   return exclusive(async () => {
     try {
       await pull(!discardLocal);
+      // Discarded edits must not come back on the next visit.
+      if (discardLocal) void persistPending();
     } catch (error) {
       handleSyncError(error);
       throw error;
@@ -144,17 +182,68 @@ export function refreshWorkspace(discardLocal = false): Promise<void> {
 
 function handleSyncError(error: unknown) {
   const e = error as Error & { status?: number };
-  if (e.status === 401) {
+  const kind = classifyFailure(error);
+  // Whatever happens next, unsaved edits stay in this browser.
+  if (unpersisted()) void persistPending();
+  if (kind === 'signedOut') {
     stopSync?.();
     stopSync = undefined;
     useAuth.setState({ mode: 'signedOut', user: null, sync: 'saved', error: e.message });
     return;
   }
+  if (kind === 'offline') {
+    goOffline();
+    return;
+  }
   useAuth.setState({ sync: 'error', syncError: e.message });
-  // Network hiccups and restarts heal on their own; permission errors wait for the member.
-  if (e.status !== 403 && e.status !== 400) {
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => void flushWorkspace(), 5000);
+  // Server failures heal on their own; permission and validation errors wait for the member.
+  if (retryableError(e.status)) scheduleRetry();
+}
+
+/** The server cannot be reached: keep working locally and try again in the background. */
+function goOffline() {
+  if (pendingChanges()) unsavedOffline = true;
+  useAuth.setState({ sync: 'offline', syncError: '' });
+  scheduleRetry();
+}
+
+function stopRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = undefined;
+  retryAttempt = 0;
+}
+
+/** One retry loop at most: after 2 s, 5 s, 10 s, then every 30 s until a request gets through. */
+function scheduleRetry() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = undefined;
+    retryAttempt++;
+    void reconnectWorkspace();
+  }, retryDelay(retryAttempt));
+}
+
+/** A request got through after the connection was lost (or after a failed pull): back to normal. */
+function connected() {
+  const { sync } = useAuth.getState();
+  const local = pendingChanges();
+  if (sync !== 'offline' && !(sync === 'error' && !local)) return;
+  stopRetry();
+  useAuth.setState({ sync: local ? 'saving' : 'saved', syncError: '' });
+  if (local) scheduleFlush(0);
+}
+
+/** Saves what waited for the network, then catches up with teammates. Safe to call at any time. */
+export async function reconnectWorkspace(): Promise<void> {
+  if (useAuth.getState().mode !== 'signedIn') return;
+  await flushWorkspace();
+  const { sync } = useAuth.getState();
+  // The save failed again; the retry loop is already scheduled.
+  if (pendingChanges() && (sync === 'offline' || sync === 'error')) return;
+  await exclusive(() => pull().catch(handleSyncError));
+  if (eventsClosed && useAuth.getState().mode === 'signedIn' && useAuth.getState().sync !== 'offline' && Date.now() - eventsRevivedAt > 60000) {
+    eventsRevivedAt = Date.now();
+    startSync(true);
   }
 }
 
@@ -165,19 +254,29 @@ export function flushWorkspace(): Promise<void> {
     const snapshot = shared();
     const changes = diffShared(base, snapshot);
     if (!changes) {
-      if (useAuth.getState().sync !== 'error') useAuth.setState({ sync: 'saved' });
+      // Offline or failed states only clear once a request gets through.
+      if (useAuth.getState().sync === 'saving') useAuth.setState({ sync: 'saved' });
       return;
     }
-    useAuth.setState({ sync: 'saving', syncError: '' });
+    // While offline, retries run quietly under the calm offline notice instead of flickering.
+    if (useAuth.getState().sync !== 'offline') useAuth.setState({ sync: 'saving', syncError: '' });
     try {
       const result = await api<{ revision: number }>('/api/workspace', 'PATCH', { baseRevision: revision, changes });
       const expected = revision + 1;
       base = snapshot;
       revision = result.revision;
+      stopRetry();
+      if (useAuth.getState().sync === 'offline') useAuth.setState({ sync: 'saving' });
       // Someone else saved in between: bring their edits in right away. Forced, because the revision
       // is already the new one and a plain pull would take the data as current.
       if (result.revision !== expected) await pull(true, true);
-      useAuth.setState({ sync: pendingChanges() ? 'saving' : 'saved', syncError: '' });
+      const left = pendingChanges();
+      useAuth.setState({ sync: left ? 'saving' : 'saved', syncError: '' });
+      if (!left) {
+        void persistPending();
+        if (unsavedOffline) toast({ message: tr('sync.reconnected'), tone: 'success' });
+        unsavedOffline = false;
+      }
     } catch (error) {
       handleSyncError(error);
     }
@@ -196,6 +295,92 @@ function schedulePull(delay = 150) {
   pullTimer = setTimeout(() => void exclusive(() => pull().catch(handleSyncError)), delay);
 }
 
+/**
+ * Someone else saved. A delta that continues from the revision this tab has is applied in place, with unsaved
+ * local edits replayed on top; without one (too large, older server, missed revisions) the workspace is reloaded.
+ * Runs in turn with saves, so a delta never lands in the middle of one.
+ */
+export function receiveRevision(event: RevisionEvent): Promise<void> {
+  if (event.tab === TAB_ID || event.revision === revision) return Promise.resolve();
+  const delta = event.delta;
+  if (!delta || typeof event.baseRevision !== 'number') {
+    schedulePull();
+    return Promise.resolve();
+  }
+  return exclusive(async () => {
+    const user = useAuth.getState().user;
+    if (useAuth.getState().mode !== 'signedIn' || !user || !base) return;
+    // Already included: this tab saved or reloaded after the event was sent.
+    if (event.revision <= revision) return;
+    if (event.baseRevision !== revision) return pull();
+    applyRemote(applyDelta(base, delta) as Partial<DataState>, user, event.revision);
+  }).catch(handleSyncError);
+}
+
+/* Unsaved changes are also kept in IndexedDB (offline.ts), so a closed tab or a long outage loses nothing. */
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let persistChain: Promise<unknown> = Promise.resolve();
+/** Bumped on every local edit; compared with the version last written to IndexedDB. */
+let changeVersion = 0;
+let persistedVersion = 0;
+/** Key of the entry this tab has in IndexedDB, if any. */
+let storedKey: string | null = null;
+/** The live stream connected at least once, so a closed stream is worth reopening. */
+let streamWorked = false;
+
+function schedulePersist(delay = 1000) {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => void persistPending(), delay);
+}
+
+/** Writes this tab's unsaved changes to IndexedDB, or removes its entry once everything is saved. */
+function persistPending(): Promise<void> {
+  clearTimeout(persistTimer);
+  const user = useAuth.getState().user;
+  if (!user || !base) return persistChain.then(() => undefined);
+  const changes = pendingChanges();
+  const version = changeVersion;
+  const key = pendingKey(user.id, TAB_ID);
+  const entry = changes && { userId: user.id, revision, changes, savedAt: Date.now() };
+  const run = persistChain.then(async () => {
+    if (entry) {
+      await savePendingEntry(key, entry);
+      storedKey = key;
+    } else if (storedKey === key) {
+      await deletePendingEntries([key]);
+      storedKey = null;
+    }
+    persistedVersion = version;
+  });
+  persistChain = run.catch(() => undefined);
+  return run.catch(() => undefined);
+}
+/** Local edits that are not in IndexedDB yet, or cannot be because it is unavailable. */
+const unpersisted = () => persistedVersion !== changeVersion;
+
+/**
+ * Brings back changes this person could not save before (the tab was closed offline, the session
+ * expired), rebased field by field on fresh server data like live edits, and saves them.
+ */
+async function restoreUnsaved(userId: string) {
+  const ownKey = pendingKey(userId, TAB_ID);
+  const stored = await loadRestorable(userId, ownKey).catch(() => []);
+  const { mode, user } = useAuth.getState();
+  if (!stored.length || mode !== 'signedIn' || user?.id !== userId || !base) return;
+  const local = shared();
+  const merged = replayPending(local, stored);
+  const restored = !!diffShared(local, merged);
+  if (restored) {
+    const { prefs, plane, ai, meId, onboarded } = useData.getState();
+    useData.getState().replaceAll({ ...createEmptyData(prefs.lang), ...(merged as Partial<DataState>), meId, onboarded, prefs, plane, ai });
+  }
+  // This tab now holds the changes; the old entries go once its own entry is written.
+  await persistPending();
+  if (unpersisted()) return;
+  await deletePendingEntries(stored.map((s) => s.key).filter((key) => key !== ownKey)).catch(() => undefined);
+  if (restored && pendingChanges()) toast({ message: tr('sync.restored') });
+}
+
 let lastPresencePath = '';
 /** Tells teammates which page this member has open. */
 export function reportPresence(path = lastPresencePath) {
@@ -204,8 +389,11 @@ export function reportPresence(path = lastPresencePath) {
   void api('/api/presence', 'POST', { path }).catch(() => undefined);
 }
 
-function startSync() {
+function startSync(resume = false) {
   stopSync?.();
+  eventsClosed = false;
+  const user = useAuth.getState().user;
+  const releaseLock = user ? holdPendingLock(pendingKey(user.id, TAB_ID)) : () => undefined;
   const unsub = useData.subscribe(() => {
     const user = useAuth.getState().user;
     if (user && !applying) {
@@ -217,62 +405,104 @@ function startSync() {
       }
     }
     if (applying || !pendingChanges()) return;
-    useAuth.setState((s) => (s.sync === 'error' ? {} : { sync: 'saving' }));
-    scheduleFlush();
+    changeVersion++;
+    const offline = useAuth.getState().sync === 'offline';
+    if (offline) unsavedOffline = true;
+    useAuth.setState((s) => (s.sync === 'error' || s.sync === 'offline' ? {} : { sync: 'saving' }));
+    schedulePersist();
+    // While offline the retry loop and the 'online' event save the edits.
+    if (!offline) scheduleFlush();
   });
 
   let events: EventSource | undefined;
   if (typeof EventSource !== 'undefined') {
     events = new EventSource('/api/events');
-    events.addEventListener('revision', (e) => {
-      const { revision: rev, tab } = JSON.parse((e as MessageEvent).data) as { revision: number; tab?: string };
-      if (tab !== TAB_ID && rev !== revision) schedulePull();
-    });
+    events.addEventListener('revision', (e) => void receiveRevision(JSON.parse((e as MessageEvent).data) as RevisionEvent));
     // An administrator changed this member's role or projects: reload what they can see.
     events.addEventListener('access', () => void exclusive(() => pull(true, true).catch(handleSyncError)));
     events.addEventListener('presence', (e) => {
       usePresence.setState({ peers: (JSON.parse((e as MessageEvent).data) as { peers: Peer[] }).peers });
     });
+    let reopened = resume;
     events.onopen = () => {
       usePresence.setState({ live: true });
       reportPresence();
+      streamWorked = true;
+      // The stream came back after a drop: save what waited and catch up on what was missed.
+      if (reopened) void reconnectWorkspace();
+      reopened = true;
     };
-    events.onerror = () => usePresence.setState({ live: false });
+    events.onerror = () => {
+      usePresence.setState({ live: false });
+      // An error page (for example from a proxy while the server restarts) ends the stream for good.
+      if (events?.readyState === EventSource.CLOSED && streamWorked) eventsClosed = true;
+    };
   }
   // Fallback when live events are blocked by a proxy.
   const interval = setInterval(() => {
-    if (document.visibilityState === 'visible' && !usePresence.getState().live) schedulePull(0);
+    if (document.visibilityState !== 'visible' || usePresence.getState().live) return;
+    if (eventsClosed) void reconnectWorkspace();
+    else schedulePull(0);
   }, 15000);
   const heartbeat = setInterval(() => {
     if (document.visibilityState === 'visible') reportPresence();
   }, 45000);
   const beforeUnload = (e: BeforeUnloadEvent) => {
-    if (pendingChanges()) {
+    if (!pendingChanges()) return;
+    if (unpersisted()) void persistPending();
+    // Changes already kept in this browser come back on the next visit; warn only about the rest.
+    if (unpersisted()) {
       e.preventDefault();
       e.returnValue = '';
     }
   };
   const onVisibility = () => {
-    if (document.visibilityState === 'hidden') void flushWorkspace();
-    else {
+    if (document.visibilityState === 'hidden') {
+      if (unpersisted()) void persistPending();
+      void flushWorkspace();
+    } else {
       schedulePull(0);
       reportPresence();
     }
   };
+  const onPageHide = () => {
+    if (unpersisted()) void persistPending();
+  };
+  const onOnline = () => {
+    stopRetry();
+    void reconnectWorkspace();
+  };
+  const onOffline = () => {
+    if (unpersisted()) void persistPending();
+    goOffline();
+  };
   window.addEventListener('beforeunload', beforeUnload);
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('online', onOnline);
+  window.addEventListener('offline', onOffline);
   document.addEventListener('visibilitychange', onVisibility);
   stopSync = () => {
     unsub();
     events?.close();
     clearTimeout(flushTimer);
     clearTimeout(pullTimer);
-    clearTimeout(retryTimer);
+    clearTimeout(persistTimer);
+    stopRetry();
     clearInterval(interval);
     clearInterval(heartbeat);
+    releaseLock();
     usePresence.setState({ peers: [], live: false });
     window.removeEventListener('beforeunload', beforeUnload);
+    window.removeEventListener('pagehide', onPageHide);
+    window.removeEventListener('online', onOnline);
+    window.removeEventListener('offline', onOffline);
     document.removeEventListener('visibilitychange', onVisibility);
   };
+  // Restarted with edits still waiting (the live stream was reopened): keep saving them.
+  if (pendingChanges()) {
+    schedulePersist();
+    if (useAuth.getState().sync !== 'offline') scheduleFlush();
+  }
 }
 export async function enterAccount(user: AuthUser) {
   await flushLocalStorage();
@@ -281,7 +511,10 @@ export async function enterAccount(user: AuthUser) {
   setRemoteStorage(true);
   base = null;
   revision = 0;
-  useAuth.setState({ user, mode: 'loading', error: '' });
+  unsavedOffline = false;
+  streamWorked = false;
+  eventsRevivedAt = 0;
+  useAuth.setState({ user, mode: 'loading', error: '', sync: 'saved', syncError: '' });
   const empty = createEmptyData(useData.getState().prefs.lang);
   let privateSettings = { plane: empty.plane, ai: empty.ai };
   try {
@@ -302,14 +535,19 @@ export async function enterAccount(user: AuthUser) {
     startSync();
   } catch (e) {
     useAuth.setState({ mode: 'signedOut', error: (e as Error).message });
+    return;
   }
+  await restoreUnsaved(user.id);
 }
 export async function bootstrapAuth() {
   try {
-    const result = await api<{ user: AuthUser | null; setup: boolean }>('/api/auth/session');
-    useAuth.setState({ setup: result.setup });
-    if (result.user) await enterAccount(result.user);
-    else if (sessionStorage.getItem('done:mode') === 'local' && !new URLSearchParams(location.search).has('invite')) await enterLocal();
+    const result = await api<{ user: AuthUser | null; setup: boolean; mail?: boolean }>('/api/auth/session');
+    useAuth.setState({ setup: result.setup, mail: !!result.mail });
+    const params = new URLSearchParams(location.search);
+    // A reset link comes first, even in a browser that is signed in or was in the demo.
+    if (params.has('reset')) useAuth.setState({ mode: 'signedOut' });
+    else if (result.user) await enterAccount(result.user);
+    else if (sessionStorage.getItem('done:mode') === 'local' && !params.has('invite')) await enterLocal();
     else useAuth.setState({ mode: 'signedOut' });
   } catch (e) {
     useAuth.setState({ mode: 'signedOut', error: (e as Error).message });
@@ -327,12 +565,23 @@ export async function logout() {
   sessionStorage.removeItem('done:mode');
   await flushWorkspace();
   if (hasUnsavedChanges()) {
-    toast({ message: 'Сначала сохраните изменения или разрешите конфликт.', tone: 'error' });
+    const offline = useAuth.getState().sync === 'offline';
+    toast({ message: tr(offline ? 'sync.logoutOffline' : 'sync.logoutUnsaved'), tone: offline ? 'default' : 'error' });
     return;
   }
-  if (useAuth.getState().mode === 'signedIn') await api('/api/auth/logout', 'POST', {});
+  if (useAuth.getState().mode === 'signedIn') {
+    try {
+      await api('/api/auth/logout', 'POST', {});
+    } catch (error) {
+      // The session can only be ended on the server; signing out locally would leave it active.
+      if (classifyFailure(error) !== 'offline') throw error;
+      toast({ message: tr('sync.logoutNoNetwork') });
+      return;
+    }
+  }
   stopSync?.();
   stopSync = undefined;
+  unsavedOffline = false;
   setRemoteStorage(true);
   applying = true;
   useData.getState().replaceAll(createEmptyData(useData.getState().prefs.lang));
@@ -352,6 +601,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
   const docProject = (id: unknown) => s.docs[id as string]?.projectId;
   const nodeProject = (id: unknown) => s.files[id as string]?.projectId;
   const sprintProject = (id: unknown) => s.sprints[id as string]?.projectId;
+  const templateProject = (id: unknown) => s.templates[id as string]?.projectId;
   const ids = (value: unknown) => (Array.isArray(value) ? (value as string[]) : []);
   const patch = (value: unknown) => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
   const moveTarget = (value: unknown) => (patch(value).projectId as string | undefined) ?? undefined;
@@ -423,11 +673,27 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
     case 'updateComment':
     case 'deleteComment':
       return s.comments[args[0] as string]?.authorId === user.id || isAdmin(user);
+    case 'toggleReaction': {
+      // Anyone who may comment on the task or page can react, including to their own comments.
+      const comment = s.comments[args[0] as string];
+      return !!comment && canCommentProject(comment.targetKind === 'item' ? itemProject(comment.targetId) : docProject(comment.targetId));
+    }
     case 'updateSprint':
     case 'startSprint':
     case 'completeSprint':
     case 'deleteSprint':
       return edit(sprintProject(args[0]));
+    // Templates shared by every project need the same rights as workspace pages.
+    case 'createTemplate':
+      return edit(patch(args[0]).projectId as string | undefined);
+    case 'updateTemplate':
+      return edit(templateProject(args[0])) && (!('projectId' in patch(args[1])) || edit(patch(args[1]).projectId as string | undefined));
+    case 'deleteTemplate':
+      return edit(templateProject(args[0]));
+    case 'createItemFromTemplate':
+      return edit(patch(args[1]).projectId as string);
+    case 'saveItemAsTemplate':
+      return edit(itemProject(args[0]));
     default:
       return user.role !== 'viewer';
   }

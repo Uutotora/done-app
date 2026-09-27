@@ -13,6 +13,8 @@ export interface Toast {
 interface CreateItemState {
   open: boolean;
   defaults?: Partial<Item>;
+  /** Task template picked in a "New ▾" menu. */
+  templateId?: ID;
 }
 
 interface LinkDialogState {
@@ -40,7 +42,7 @@ interface UIState {
   openPeek: (id?: ID) => void;
   setPalette: (open: boolean) => void;
   setShortcuts: (open: boolean) => void;
-  openCreateItem: (defaults?: Partial<Item>) => void;
+  openCreateItem: (defaults?: Partial<Item>, templateId?: ID) => void;
   closeCreateItem: () => void;
   openLinkDialog: (opts?: Omit<LinkDialogState, 'open'>) => void;
   closeLinkDialog: () => void;
@@ -64,7 +66,7 @@ export const useUI = create<UIState>()((set) => ({
   openPeek: (id) => set({ peekItemId: id }),
   setPalette: (open) => set({ paletteOpen: open }),
   setShortcuts: (open) => set({ shortcutsOpen: open }),
-  openCreateItem: (defaults) => set({ createItem: { open: true, defaults } }),
+  openCreateItem: (defaults, templateId) => set({ createItem: { open: true, defaults, templateId } }),
   closeCreateItem: () => set((s) => ({ createItem: { ...s.createItem, open: false } })),
   openLinkDialog: (opts) => set({ linkDialog: { open: true, ...opts } }),
   closeLinkDialog: () => set((s) => ({ linkDialog: { ...s.linkDialog, open: false } })),

@@ -14,6 +14,7 @@ import { ContextMenu, EntriesMenu } from './ui/Overlay';
 import { IconButton } from './ui/Button';
 import { PriorityIcon, StatusIcon, TypeIcon } from './pickers/icons';
 import { TagChip } from './pickers/Pickers';
+import { RecurrenceMark } from './pickers/RecurrencePicker';
 import { blockersOf, isFinished } from '@/lib/work';
 import { itemMenuEntries } from './itemMenu';
 
@@ -120,6 +121,7 @@ export const ItemCard = forwardRef<
             <span className={cn('flex items-center gap-1', overdue && 'font-medium text-[var(--c-red-text)]')}>
               <CalendarDays size={12} />
               {formatShortDate(item.dueDate, lang)}
+              <RecurrenceMark rule={item.recurrence} size={11} className={cn(overdue && 'text-inherit')} />
             </span>
           )}
           {sub.total > 0 && (

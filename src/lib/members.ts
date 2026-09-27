@@ -45,6 +45,16 @@ export interface AccessInput {
 export interface InviteResult {
   links: { email: string; url: string }[];
   skipped: { email: string; reason: string }[];
+  /** The server sends email: addresses that got their invitation and those it could not reach. */
+  mailed?: boolean;
+  emailed?: string[];
+  failed?: string[];
+}
+
+/** Outgoing email on the server, as administrators see it. */
+export interface MailSettings {
+  configured: boolean;
+  from?: string;
 }
 
 export const ROLE_ORDER: AccessRole[] = ['owner', 'admin', 'editor', 'viewer'];
@@ -53,10 +63,12 @@ export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 interface RemoteState {
   users: AuthUser[];
   invites: PendingInvite[];
+  mail: MailSettings;
   loaded: boolean;
   error: string;
 }
-const useRemote = create<RemoteState>(() => ({ users: [], invites: [], loaded: false, error: '' }));
+const useRemote = create<RemoteState>(() => ({ users: [], invites: [], mail: { configured: false }, loaded: false, error: '' }));
+const uiLang = () => useData.getState().prefs.lang;
 
 let inflight: Promise<void> | null = null;
 /**
@@ -69,10 +81,18 @@ export function refreshMembers(): Promise<void> {
   if (!user) return Promise.resolve();
   inflight ??= (
     isAdmin(user)
-      ? api<{ members: AuthUser[]; invites: PendingInvite[] }>('/api/admin/members')
-      : api<{ members: AuthUser[] }>('/api/members').then((r) => ({ members: r.members, invites: [] }))
+      ? api<{ members: AuthUser[]; invites: PendingInvite[]; mail?: MailSettings }>('/api/admin/members')
+      : api<{ members: AuthUser[] }>('/api/members').then((r) => ({ members: r.members, invites: [], mail: undefined }))
   )
-    .then((result) => useRemote.setState({ users: result.members, invites: result.invites, loaded: true, error: '' }))
+    .then((result) =>
+      useRemote.setState({
+        users: result.members,
+        invites: result.invites,
+        mail: result.mail ?? { configured: false },
+        loaded: true,
+        error: '',
+      }),
+    )
     .catch((e: Error) => useRemote.setState({ error: e.message, loaded: true }))
     .finally(() => {
       inflight = null;
@@ -138,6 +158,7 @@ export function useMembers() {
   return {
     members,
     invites: signedIn ? remote.invites : [],
+    mail: signedIn ? remote.mail : { configured: false },
     loaded: !signedIn || remote.loaded,
     error: signedIn ? remote.error : '',
     remote: signedIn,
@@ -205,13 +226,22 @@ function cleanAccess(input: AccessInput): AccessInput {
 export async function inviteMembers(emails: string[], input: AccessInput): Promise<InviteResult> {
   const access = cleanAccess(input);
   if (useAuth.getState().mode === 'signedIn') {
-    const result = await api<{ invites: { email: string; token: string }[]; skipped: { email: string; reason: string }[] }>(
-      '/api/admin/invites',
-      'POST',
-      { emails, ...access },
-    );
+    const result = await api<{
+      invites: { email: string; token: string; url?: string | null }[];
+      skipped: { email: string; reason: string }[];
+      emailed?: string[];
+      failed?: string[];
+    }>('/api/admin/invites', 'POST', { emails, ...access, lang: uiLang() });
     await refreshMembers();
-    return { links: result.invites.map((i) => ({ email: i.email, url: inviteUrl(i.token, i.email) })), skipped: result.skipped };
+    return {
+      // The server builds links from its public address when it has one.
+      links: result.invites.map((i) => ({ email: i.email, url: i.url || inviteUrl(i.token, i.email) })),
+      skipped: result.skipped,
+      // Without email on the server both lists are empty.
+      mailed: !!(result.emailed?.length || result.failed?.length),
+      emailed: result.emailed ?? [],
+      failed: result.failed ?? [],
+    };
   }
   // Local demo: people are added right away; there is nobody to accept an invitation.
   const s = useData.getState();
@@ -291,20 +321,40 @@ export async function revokeInvite(email: string) {
   await refreshMembers();
 }
 
-/** A fresh link for a pending invitation (the old link stops working). */
-export async function renewInvite(invite: PendingInvite): Promise<string> {
-  const result = await api<{ invites: { email: string; token: string }[] }>('/api/admin/invites', 'POST', {
-    emails: [invite.email],
-    role: invite.role,
-    projectIds: invite.projectIds,
-    projectRoles: invite.projectRoles,
-    canCreateProjects: invite.canCreateProjects,
+/**
+ * A fresh link for a pending invitation, with the same access (the old link stops working).
+ * When the server sends email, the invitation goes out again.
+ */
+export async function renewInvite(invite: PendingInvite): Promise<{ url: string; emailed: boolean }> {
+  const result = await api<{ token: string; url?: string | null; emailed?: boolean }>('/api/admin/invites/resend', 'POST', {
+    email: invite.email,
+    lang: uiLang(),
   });
   await refreshMembers();
-  return inviteUrl(result.invites[0].token, invite.email);
+  return { url: result.url || inviteUrl(result.token, invite.email), emailed: !!result.emailed };
 }
 
-/** Invitation text for a mail client, since the server does not send email itself. */
+/** A one-time link to set a new password, emailed to the member when the server sends email. */
+export async function createResetLink(member: Member): Promise<{ url: string; emailed: boolean; expires: number }> {
+  const result = await api<{ token: string; url?: string | null; emailed?: boolean; expires: number }>(
+    `/api/admin/members/${encodeURIComponent(member.id)}/reset`,
+    'POST',
+    { lang: uiLang() },
+  );
+  return {
+    url: result.url || `${window.location.origin}/?reset=${encodeURIComponent(result.token)}`,
+    emailed: !!result.emailed,
+    expires: result.expires,
+  };
+}
+
+/** Sends a test email to the administrator's own address; resolves to that address. */
+export async function sendTestMail(): Promise<string> {
+  const result = await api<{ to: string }>('/api/admin/mail/test', 'POST', { lang: uiLang() });
+  return result.to;
+}
+
+/** Invitation text for a mail client, for when the server does not send email itself. */
 export function inviteMailto(email: string, url: string, workspace: string, lang: 'ru' | 'en'): string {
   const subject = lang === 'ru' ? `Приглашение в ${workspace} в Done` : `Join ${workspace} on Done`;
   const body =

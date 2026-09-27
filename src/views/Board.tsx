@@ -21,13 +21,16 @@ import { useUI } from '@/lib/ui';
 import { useT, type TKey } from '@/lib/i18n';
 import { useViewState } from '@/lib/viewState';
 import { useItems } from '@/lib/selectors';
-import { useProjectSprints } from '@/lib/sprints';
+import { sortSprints, useProjectSprints } from '@/lib/sprints';
 import { EMPTY_FILTER, filterItems, groupItems, sortItems, type GroupField, type ItemFilter } from '@/lib/itemQuery';
+import { BOARD_COLUMNS, queryRows } from '@/lib/itemExport';
 import { HORIZON_COLOR, PRIORITY_COLOR, STATUS_META, TYPE_META } from '@/lib/constants';
 import type { ColorName, ID, Item } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { ViewBar, NewButton } from '@/components/ViewBar';
+import { ViewBar } from '@/components/ViewBar';
+import { NewWithTemplates } from '@/components/templates/TemplateMenu';
 import { FilterButton, FilterPills, GroupButton, SearchToggle } from '@/components/QueryControls';
+import { csvMenuEntry, downloadItemsCsv, itemExportContext, ViewMoreMenu } from '@/components/ExportMenu';
 import { ItemCard } from '@/components/ItemCard';
 import { Avatar, Chip } from '@/components/ui/bits';
 import { IconButton } from '@/components/ui/Button';
@@ -59,12 +62,26 @@ export function BoardView() {
           onChange={(g) => g !== 'none' && set({ group: g, collapsed: g === 'status' ? ['canceled'] : [] })}
         />
         <SearchToggle value={settings.filter.search} onChange={(search) => set({ filter: { ...settings.filter, search } })} />
-        <NewButton onClick={() => openCreateItem({ projectId })}>{t('common.new')}</NewButton>
+        <ViewMoreMenu entries={[csvMenuEntry(() => exportBoard(projectId!, settings), t)]} />
+        <NewWithTemplates projectId={projectId} onCreate={(templateId) => openCreateItem({ projectId }, templateId)}>
+          {t('common.new')}
+        </NewWithTemplates>
       </ViewBar>
       <FilterPills filter={settings.filter} onChange={(filter) => set({ filter })} />
       <Board projectId={projectId!} settings={settings} onCollapse={(collapsed) => set({ collapsed })} />
     </div>
   );
+}
+
+/** Cards column by column, top to bottom, with the column as the first field. */
+function exportBoard(projectId: ID, settings: BoardSettings) {
+  const ctx = itemExportContext();
+  const items = Object.values(ctx.items).filter((i) => i.projectId === projectId);
+  const sprints = sortSprints(Object.values(ctx.sprints).filter((sp) => sp.projectId === projectId));
+  const rows = queryRows(items, { filter: settings.filter, sort: { field: 'manual', dir: 'asc' }, group: settings.group }, ctx, sprints, false);
+  const project = ctx.projects[projectId];
+  const name = `${project?.name.trim() || ctx.t('project.untitled')} · ${ctx.t('board.title')}`;
+  downloadItemsCsv(rows, BOARD_COLUMNS, ctx, name, { withGroup: true });
 }
 
 export function Board({

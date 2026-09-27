@@ -8,12 +8,14 @@ import {
   applyChanges,
   canReadProject,
   canWriteProject,
+  deltaIndex,
   isAdmin,
   mergeState,
   normalizeRole,
   projectLevel,
   sharedState,
   validateState,
+  visibleDelta,
   visibleState,
 } from './access.mjs';
 import {
@@ -26,6 +28,8 @@ import {
   uploadReferences,
   validBlobId,
 } from './blobs.mjs';
+import { contentEvents, isContentAction } from './contentAudit.mjs';
+import { createMail, inviteEmail, resetEmail, testEmail } from './mail.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -60,6 +64,29 @@ const DEFAULT_MAX_UPLOAD_MB = 100;
 /** Images and files inserted into pages, tasks and project briefs. */
 const EDITOR_UPLOAD_MB = 20;
 const CLEANUP_EVERY = 6 * 3600000;
+const HOUR = 3600000;
+/** Counts requests per key in a fixed window; the map stays bounded under a flood of keys. */
+function createLimiter(max, windowMs, cap = 10000) {
+  const hits = new Map();
+  return (key) => {
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || entry.reset <= now) {
+      hits.delete(key);
+      entry = { count: 0, reset: now + windowMs };
+      hits.set(key, entry);
+    }
+    entry.count++;
+    if (hits.size > cap) {
+      for (const [k, v] of hits) if (v.reset <= now) hits.delete(k);
+      for (const k of hits.keys()) {
+        if (hits.size <= cap) break;
+        hits.delete(k);
+      }
+    }
+    return entry.count <= max;
+  };
+}
 
 export function createAuthApi({
   filename = process.env.DONE_DB_PATH || resolve('.data/done.sqlite'),
@@ -67,6 +94,10 @@ export function createAuthApi({
   // Uploaded files live next to the database unless DONE_FILES_DIR says otherwise; an in-memory database gets a temporary directory.
   filesDir = filename === ':memory:' ? undefined : resolve(process.env.DONE_FILES_DIR || resolve(dirname(filename), 'files')),
   maxUploadMb = Number(process.env.DONE_MAX_UPLOAD_MB) > 0 ? Number(process.env.DONE_MAX_UPLOAD_MB) : DEFAULT_MAX_UPLOAD_MB,
+  // Email: a transport with sendMail (tests), the public URL for links and the sender; default to the environment.
+  mailer,
+  publicUrl,
+  mailFrom,
 } = {}) {
   if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
@@ -75,7 +106,8 @@ export function createAuthApi({
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, project_ids TEXT, expires INTEGER NOT NULL, created_by TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, revision INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, created_at INTEGER NOT NULL);`);
   // Columns added after the first release; older databases are upgraded in place.
   const addColumn = (table, name, definition) => {
     if (
@@ -110,19 +142,72 @@ export function createAuthApi({
   firstCleanup.unref?.();
   const cleanupTimer = setInterval(cleanup, CLEANUP_EVERY);
   cleanupTimer.unref?.();
+  // The security log holds access events (sign-ins, invitations, roles) and content events (created, deleted, renamed).
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('audit') WHERE name='kind'").get()) {
+    db.exec("ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'access'; UPDATE audit SET kind='content' WHERE action='project.created';");
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS audit_kind ON audit(kind, id)');
   const attempts = new Map();
+  const mail = createMail({ transport: mailer, publicUrl, from: mailFrom });
+  // Password reset: requests per IP and per address, and uses of reset links per IP.
+  const resetRequestsByIp = createLimiter(20, 15 * 60000);
+  const resetRequestsByEmail = createLimiter(5, 15 * 60000);
+  const resetLinksByIp = createLimiter(30, 15 * 60000);
+  const mailTests = createLimiter(5, 15 * 60000);
+  const background = new Set();
+  /** Work that must not delay the response or change its timing, such as sending a reset email. */
+  const later = (task) => {
+    const run = new Promise((resolve) => setImmediate(resolve))
+      .then(task)
+      .catch((error) => console.error('Done background task failed:', error?.message ?? error))
+      .finally(() => background.delete(run));
+    background.add(run);
+  };
   const audit = (user, action, detail = '') =>
-    db.prepare('INSERT INTO audit(actor,action,detail,at) VALUES(?,?,?,?)').run(user, action, detail, new Date().toISOString());
+    db
+      .prepare('INSERT INTO audit(actor,action,detail,at,kind) VALUES(?,?,?,?,?)')
+      .run(user, action, detail, new Date().toISOString(), isContentAction(action) ? 'content' : 'access');
+  const AUDIT_PAGE = 100;
+  // Renames arrive a few characters at a time; a burst of renames of one record by one person is kept as one entry.
+  const RENAME_WINDOW = 5 * 60000;
+  const renames = new Map();
+  /** Writes the content events of one save. Runs inside the transaction that stores the workspace. */
+  const auditContent = (actorId, events) => {
+    const now = Date.now();
+    if (renames.size > 1000) for (const [key, r] of renames) if (now - r.at > RENAME_WINDOW) renames.delete(key);
+    for (const event of events) {
+      const previous = event.rename && renames.get(event.target);
+      if (previous && previous.actor === actorId && now - previous.at < RENAME_WINDOW) {
+        previous.at = now;
+        // A page named right after it was created: the creation shows the name.
+        if (previous.created) db.prepare('UPDATE audit SET detail=? WHERE id=?').run(`${event.rename.to}${event.rename.suffix}`, previous.id);
+        // Renamed back to where it started: nothing changed in the end.
+        else if (previous.from === event.rename.to) {
+          db.prepare('DELETE FROM audit WHERE id=?').run(previous.id);
+          renames.delete(event.target);
+        } else db.prepare('UPDATE audit SET detail=? WHERE id=?').run(`${previous.from} → ${event.rename.to}${event.rename.suffix}`, previous.id);
+        continue;
+      }
+      const row = audit(actorId, event.action, event.detail);
+      const id = Number(row.lastInsertRowid);
+      if (event.rename) renames.set(event.target, { id, actor: actorId, from: event.rename.from, at: now });
+      else if (/^(project|doc)\.created$/.test(event.action)) renames.set(event.target, { id, actor: actorId, created: true, at: now });
+      else if (event.target) renames.delete(event.target);
+    }
+  };
   // Live updates: every signed-in tab keeps one Server-Sent Events stream open.
   const streams = new Set();
   const presence = new Map();
-  const emit = (stream, event, data) => {
+  const emitRaw = (stream, event, json) => {
     try {
-      stream.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      stream.res.write(`event: ${event}\ndata: ${json}\n\n`);
     } catch {
       /* the socket is closing */
     }
   };
+  const emit = (stream, event, data) => emitRaw(stream, event, JSON.stringify(data));
+  /** Largest live update sent to one tab; bigger changes make it reload the workspace instead. */
+  const DELTA_LIMIT = 512 * 1024;
   // Which project a task or page belongs to, rebuilt only when the workspace revision changes.
   let pathIndex = { revision: -1, items: new Map(), docs: new Map() };
   const currentPathIndex = () => {
@@ -165,8 +250,44 @@ export function createAuthApi({
       });
     }
   };
-  const broadcastRevision = (revision, actorId, tab) => {
-    for (const stream of streams) emit(stream, 'revision', { revision, actorId, tab });
+  /**
+   * Tells every open tab about a new revision. With `write` ({ prev, next, changed }) each tab also receives
+   * `delta`: only the changes its member may see, so it can update without downloading the whole workspace.
+   * A delta that is too large or cannot be built is left out and that tab reloads instead.
+   */
+  const broadcastRevision = (revision, actorId, tab, write) => {
+    if (!streams.size) return;
+    const head = { revision, baseRevision: revision - 1, actorId, tab };
+    const plain = JSON.stringify(head);
+    // Access may have changed since a stream was opened: always use the current role and projects.
+    const members = write
+      ? new Map(
+          db
+            .prepare('SELECT * FROM users')
+            .all()
+            .map((row) => [row.id, publicUser(row)]),
+        )
+      : null;
+    let index;
+    const payloads = new Map();
+    const payloadFor = (stream) => {
+      const user = members?.get(stream.user.id);
+      if (!user || user.disabled) return plain;
+      stream.user = user;
+      if (!payloads.has(user.id)) {
+        let payload = plain;
+        try {
+          index ??= deltaIndex(write.prev, write.next);
+          const json = JSON.stringify({ ...head, delta: visibleDelta(write.prev, write.next, user, write.changed, index) });
+          if (Buffer.byteLength(json) <= DELTA_LIMIT) payload = json;
+        } catch (error) {
+          console.error('Done live update error:', error.message);
+        }
+        payloads.set(user.id, payload);
+      }
+      return payloads.get(user.id);
+    };
+    for (const stream of streams) emitRaw(stream, 'revision', payloadFor(stream));
   };
   const closeStreams = (userId) => {
     for (const stream of [...streams]) if (stream.user.id === userId) stream.res.end();
@@ -314,9 +435,35 @@ export function createAuthApi({
   const canManage = (actor, target) =>
     target.id !== actor.id && (actor.role === 'owner' || (actor.role === 'admin' && ['editor', 'viewer'].includes(target.role)));
   const activeOwners = () => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='owner' AND disabled=0").get().n;
+  const langOf = (input) => (input?.lang === 'en' ? 'en' : 'ru');
+  /** The name people see in the workspace (it can change after registration). */
+  const displayName = (row) => readWorkspace()?.data.people?.[row.id]?.name || row.name;
+  const inviteLink = (token, email) => mail.link(`invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`);
+  /** A one-time link to set a new password. Only its hash is stored, and older links of the person stop working. */
+  const createResetToken = (userId, lifetime) => {
+    const token = randomBytes(32).toString('base64url');
+    const now = Date.now();
+    db.prepare('DELETE FROM password_resets WHERE user_id=? OR expires<?').run(userId, now);
+    db.prepare('INSERT INTO password_resets(token_hash,user_id,expires,created_at) VALUES(?,?,?,?)').run(hash(token), userId, now + lifetime, now);
+    return { token, expires: now + lifetime, url: mail.link(`reset=${token}`) };
+  };
+  /** The active account a reset link belongs to, or undefined when the link is unknown, used or expired. */
+  const findReset = (token) =>
+    typeof token === 'string' && token.length > 0 && token.length <= 128
+      ? db
+          .prepare(
+            'SELECT users.* FROM password_resets JOIN users ON users.id=password_resets.user_id WHERE password_resets.token_hash=? AND password_resets.expires>? AND users.disabled=0',
+          )
+          .get(hash(token), Date.now())
+      : undefined;
   /** Tells a member's open tabs to reload their access right away. */
   const notifyAccess = (userId) => {
-    for (const stream of streams) if (stream.user.id === userId) emit(stream, 'access', { at: Date.now() });
+    const fresh = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(userId));
+    for (const stream of streams) {
+      if (stream.user.id !== userId) continue;
+      if (fresh) stream.user = fresh;
+      emit(stream, 'access', { at: Date.now() });
+    }
   };
   async function authenticatedBody(req, limit) {
     const input = await body(req, limit);
@@ -350,7 +497,7 @@ export function createAuthApi({
       }
       let user = authenticate(req);
       if (path === '/api/auth/session' && req.method === 'GET')
-        return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get() });
+        return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get(), mail: mail.configured });
       if (['/api/auth/register', '/api/auth/login'].includes(path) && req.method === 'POST') {
         const input = await body(req);
         const email = String(input.email ?? '')
@@ -389,7 +536,9 @@ export function createAuthApi({
           if (!setup && !invite) fail(403, 'An invitation is required');
           if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) fail(409, 'Account already exists');
           const id = randomUUID();
-          let data = setup ? sharedState(input.data) : readWorkspace().data;
+          const current = setup ? null : readWorkspace();
+          // A copy, so the live update can tell teammates what changed.
+          let data = setup ? sharedState(input.data) : { ...current.data, people: { ...current.data.people } };
           validateState(data);
           const color = PERSON_COLORS[Object.keys(data.people).length % PERSON_COLORS.length];
           data.people[id] = { id, name, email, color: setup ? 'blue' : color };
@@ -418,8 +567,69 @@ export function createAuthApi({
           }
           user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
           audit(id, 'account.created', email);
-          if (!setup) broadcastRevision(readWorkspace().revision, id);
+          if (!setup)
+            broadcastRevision(current.revision + 1, id, undefined, { prev: current.data, next: data, changed: { records: { people: [id] } } });
         }
+        startSession(user, res);
+        return send(res, 200, { user });
+      }
+      if (path === '/api/auth/reset/request' && req.method === 'POST') {
+        // Always the same answer, right away, so nobody can find out which addresses have accounts.
+        const input = await body(req, 4096);
+        if (!resetRequestsByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const email = String(input.email ?? '')
+          .trim()
+          .toLowerCase();
+        if (!EMAIL.test(email) || email.length > 254) fail(400, 'Enter a valid email');
+        const lang = langOf(input);
+        // Past the limit for an address nothing more is sent, but the answer stays the same.
+        if (resetRequestsByEmail(email) && mail.configured)
+          later(async () => {
+            const row = db.prepare('SELECT * FROM users WHERE email=? AND disabled=0').get(email);
+            if (!row) return;
+            const { url } = createResetToken(row.id, HOUR);
+            audit(row.id, 'password.reset.requested', email);
+            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1 }) });
+          });
+        return send(res, 200, { ok: true });
+      }
+      if (path === '/api/auth/reset/check' && req.method === 'POST') {
+        const input = await body(req, 4096);
+        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const row = findReset(input.token);
+        if (!row) fail(410, 'This link is invalid or has expired');
+        return send(res, 200, { email: row.email, name: displayName(row) });
+      }
+      if (path === '/api/auth/reset' && req.method === 'POST') {
+        const input = await body(req, 4096);
+        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const password = typeof input.password === 'string' ? input.password : '';
+        if (password.length < 12 || password.length > 256) fail(400, 'Use 12–256 characters for the password');
+        const row = findReset(input.token);
+        if (!row) fail(410, 'This link is invalid or has expired');
+        const salt = randomBytes(16).toString('hex');
+        const encoded = `${salt}:${(await derive(password, salt, 64)).toString('hex')}`;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          // The link is used up here, so a second request with it at the same time finds nothing.
+          const used = db.prepare('DELETE FROM password_resets WHERE token_hash=? AND expires>?').run(hash(input.token), Date.now());
+          const active = db.prepare('SELECT id FROM users WHERE id=? AND disabled=0').get(row.id);
+          if (!used.changes || !active) fail(410, 'This link is invalid or has expired');
+          db.prepare('UPDATE users SET password=? WHERE id=?').run(encoded, row.id);
+          // Everyone signed in with the old password is signed out, and other reset links stop working.
+          db.prepare('DELETE FROM sessions WHERE user_id=?').run(row.id);
+          db.prepare('DELETE FROM password_resets WHERE user_id=?').run(row.id);
+          db.exec('COMMIT');
+        } catch (e) {
+          db.exec('ROLLBACK');
+          throw e;
+        }
+        closeStreams(row.id);
+        // This browser may still hold another session; the new one replaces it.
+        const previous = sessionToken(req);
+        if (previous) db.prepare('DELETE FROM sessions WHERE token=?').run(hash(previous));
+        audit(row.id, 'password.reset');
+        user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(row.id));
         startSession(user, res);
         return send(res, 200, { user });
       }
@@ -447,6 +657,7 @@ export function createAuthApi({
           user.id,
         );
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+        db.prepare('DELETE FROM password_resets WHERE user_id=?').run(user.id);
         startSession(user, res);
         audit(user.id, 'password.changed');
         return send(res, 200, { ok: true });
@@ -493,25 +704,42 @@ export function createAuthApi({
           const input = await authenticatedBody(req);
           workspace = readWorkspace();
           let merged;
+          const info = {};
           if (req.method === 'PUT') {
             // Full snapshots can only be saved on top of the revision they were loaded from.
             if (input.revision !== workspace.revision) fail(409, 'Workspace changed. Reload before saving.');
-            merged = mergeState(workspace.data, sharedState(input.data), user);
+            merged = mergeState(workspace.data, sharedState(input.data), user, info);
           } else {
             // Change sets merge field by field, so concurrent edits by teammates are kept.
-            const info = {};
             merged = applyChanges(workspace.data, input.changes, user, info);
-            // Someone limited to some projects keeps access to the projects they create.
-            if (info.createdProjects?.size && user.projectIds !== null && !isAdmin(user)) {
+          }
+          // Someone limited to some projects keeps access to the projects they create.
+          const grantCreated = info.createdProjects?.size && user.projectIds !== null && !isAdmin(user);
+          let events = [];
+          try {
+            events = contentEvents(workspace.data, merged, info.changed, user.id);
+          } catch (error) {
+            // The log must never cost anyone their work.
+            console.error('Done audit error:', error.message);
+          }
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
+            if (grantCreated) {
               const ids = [...new Set([...user.projectIds, ...info.createdProjects])];
               db.prepare('UPDATE users SET project_ids=? WHERE id=?').run(JSON.stringify(ids), user.id);
-              for (const pid of info.createdProjects) audit(user.id, 'project.created', merged.projects[pid]?.name ?? pid);
             }
+            auditContent(user.id, events);
+            db.exec('COMMIT');
+          } catch (e) {
+            db.exec('ROLLBACK');
+            throw e;
           }
-          db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
           const revision = workspace.revision + 1;
           const tab = typeof req.headers['x-done-tab'] === 'string' ? req.headers['x-done-tab'].slice(0, 64) : undefined;
-          broadcastRevision(revision, user.id, tab);
+          broadcastRevision(revision, user.id, tab, info.changed && { prev: workspace.data, next: merged, changed: info.changed });
+          // Their open tabs learn about the new project access.
+          if (grantCreated) notifyAccess(user.id);
           return send(res, 200, { revision });
         }
       }
@@ -661,6 +889,7 @@ export function createAuthApi({
         if (!isAdmin(user)) fail(403, 'Administrator access required');
         if (path === '/api/admin/members' && req.method === 'GET')
           return send(res, 200, {
+            mail: { configured: mail.configured, ...(mail.configured ? { from: mail.from } : {}) },
             members: db.prepare('SELECT * FROM users ORDER BY created_at').all().map(publicUser),
             invites: db
               .prepare(
@@ -678,12 +907,21 @@ export function createAuthApi({
                 invitedBy: i.invited_by,
               })),
           });
-        if (path === '/api/admin/audit' && req.method === 'GET')
-          return send(res, 200, {
-            events: db
-              .prepare('SELECT audit.*, users.name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 200')
-              .all(),
-          });
+        if (path === '/api/admin/audit' && req.method === 'GET') {
+          // Newest first, a page at a time: ?before=<id> continues after the last entry shown, ?kind=access|content filters.
+          const query = new URL(req.url || '/', 'http://localhost').searchParams;
+          const before = query.has('before') ? Number(query.get('before')) : null;
+          const kind = query.get('kind');
+          if (before !== null && !(Number.isSafeInteger(before) && before > 0)) fail(400, 'Invalid page');
+          if (kind !== null && !['access', 'content'].includes(kind)) fail(400, 'Invalid filter');
+          const where = [...(before !== null ? ['audit.id<?'] : []), ...(kind !== null ? ['audit.kind=?'] : [])];
+          const rows = db
+            .prepare(
+              `SELECT audit.id,audit.actor,audit.action,audit.detail,audit.at,audit.kind,users.name FROM audit LEFT JOIN users ON users.id=audit.actor${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY audit.id DESC LIMIT ?`,
+            )
+            .all(...(before !== null ? [before] : []), ...(kind !== null ? [kind] : []), AUDIT_PAGE + 1);
+          return send(res, 200, { events: rows.slice(0, AUDIT_PAGE), more: rows.length > AUDIT_PAGE });
+        }
         if (path === '/api/admin/invites' && req.method === 'POST') {
           const input = await authenticatedBody(req);
           const role = normalizeRole(input.role);
@@ -701,6 +939,7 @@ export function createAuthApi({
           const canCreate = role === 'viewer' ? 0 : Number(input.canCreateProjects !== false);
           const invites = [];
           const skipped = [];
+          const expires = Date.now() + 7 * 86400000;
           for (const email of emails) {
             if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
               skipped.push({ email, reason: 'exists' });
@@ -710,12 +949,88 @@ export function createAuthApi({
             db.prepare('DELETE FROM invites WHERE email=?').run(email);
             db.prepare(
               'INSERT INTO invites(token,email,role,project_ids,project_roles,can_create_projects,expires,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-            ).run(hash(token), email, role, projectIds, projectRoles, canCreate, Date.now() + 7 * 86400000, user.id, Date.now());
+            ).run(hash(token), email, role, projectIds, projectRoles, canCreate, expires, user.id, Date.now());
             audit(user.id, 'invite.created', `${email} · ${role}`);
-            invites.push({ email, token });
+            invites.push({ email, token, url: inviteLink(token, email) });
           }
           if (!invites.length && skipped.length) fail(409, 'Account already exists');
-          return send(res, 201, { invites, skipped, ...(invites.length === 1 ? invites[0] : {}) });
+          // With email set up every address gets a letter; the links stay in the answer as a fallback.
+          let delivery = { sent: [], failed: [] };
+          if (mail.configured && invites.length) {
+            const lang = langOf(input);
+            const workspace = readWorkspace()?.data.workspace?.name;
+            const inviter = displayName(user);
+            delivery = await mail.sendAll(
+              invites.map((i) => ({ to: i.email, ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires }) })),
+            );
+          }
+          return send(res, 201, {
+            invites,
+            skipped,
+            emailed: delivery.sent,
+            failed: delivery.failed,
+            ...(invites.length === 1 ? invites[0] : {}),
+          });
+        }
+        if (path === '/api/admin/invites/resend' && req.method === 'POST') {
+          // A new link for a pending invitation (the old one stops working), emailed when email is set up.
+          const input = await authenticatedBody(req, 4096);
+          const email = String(input.email ?? '')
+            .trim()
+            .toLowerCase();
+          const invite = db.prepare('SELECT * FROM invites WHERE email=?').get(email);
+          if (!invite) fail(404, 'Invitation not found');
+          const role = normalizeRole(invite.role);
+          if (!canAssignRole(user, role)) fail(403, 'Cannot change this invitation');
+          if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
+            db.prepare('DELETE FROM invites WHERE email=?').run(email);
+            fail(409, 'Account already exists');
+          }
+          const token = randomBytes(32).toString('base64url');
+          const expires = Date.now() + 7 * 86400000;
+          db.prepare('UPDATE invites SET token=?,expires=?,created_at=?,created_by=? WHERE email=?').run(
+            hash(token),
+            expires,
+            Date.now(),
+            user.id,
+            email,
+          );
+          audit(user.id, 'invite.renewed', `${email} · ${role}`);
+          const url = inviteLink(token, email);
+          const workspace = readWorkspace()?.data.workspace?.name;
+          const emailed =
+            mail.configured &&
+            (await mail.send({
+              to: email,
+              ...inviteEmail({ lang: langOf(input), workspace, inviter: displayName(user), role, link: url, expires }),
+            }));
+          return send(res, 200, { email, token, url, expires, emailed });
+        }
+        if (/^\/api\/admin\/members\/[^/]+\/reset$/.test(path) && req.method === 'POST') {
+          // A reset link made by an administrator: emailed when possible and always returned to copy.
+          // Current sessions stay until the password is actually changed.
+          const target = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(decodeURIComponent(path.split('/')[4])));
+          if (!target) fail(404, 'Member not found');
+          if (!canManage(user, target)) fail(403, 'Cannot change this account');
+          if (target.disabled) fail(400, 'Restore access before resetting the password');
+          const input = await authenticatedBody(req, 4096);
+          const { token, url, expires } = createResetToken(target.id, 24 * HOUR);
+          audit(user.id, 'password.reset.link', target.email);
+          const emailed =
+            mail.configured &&
+            (await mail.send({
+              to: target.email,
+              ...resetEmail({ lang: langOf(input), name: displayName(target), email: target.email, link: url, hours: 24, admin: displayName(user) }),
+            }));
+          return send(res, 200, { token, url, expires, emailed });
+        }
+        if (path === '/api/admin/mail/test' && req.method === 'POST') {
+          const input = await authenticatedBody(req, 4096);
+          if (!mail.configured) fail(400, 'Email is not set up on the server');
+          if (!mailTests(user.id)) fail(429, 'Too many test emails. Try again in 15 minutes.');
+          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/` }) });
+          if (!ok) fail(502, 'Could not send the email. Check the SMTP settings and the server log.');
+          return send(res, 200, { ok: true, to: user.email });
         }
         if (path === '/api/admin/invites' && req.method === 'DELETE') {
           const input = await authenticatedBody(req);
@@ -733,7 +1048,7 @@ export function createAuthApi({
           if (req.method === 'DELETE') {
             if (leavesNoOwner) fail(400, 'The workspace needs at least one owner');
             const workspace = readWorkspace();
-            const data = workspace.data;
+            const data = { ...workspace.data, people: { ...workspace.data.people } };
             // The person stays on past work, marked as no longer in the workspace.
             if (data.people[id]) data.people[id] = { ...data.people[id], removed: true };
             db.exec('BEGIN IMMEDIATE');
@@ -749,7 +1064,11 @@ export function createAuthApi({
             closeStreams(id);
             presence.delete(id);
             audit(user.id, 'member.removed', target.email);
-            broadcastRevision(workspace.revision + 1, user.id);
+            broadcastRevision(workspace.revision + 1, user.id, undefined, {
+              prev: workspace.data,
+              next: data,
+              changed: { records: { people: data.people[id] ? [id] : [] } },
+            });
             return send(res, 200, { ok: true });
           }
           const role = input.role === undefined ? target.role : normalizeRole(input.role);
@@ -770,8 +1089,9 @@ export function createAuthApi({
             id,
           );
           if (disabled) {
-            // Suspension signs the member out everywhere at once.
+            // Suspension signs the member out everywhere at once and cancels their reset links.
             db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+            db.prepare('DELETE FROM password_resets WHERE user_id=?').run(id);
             closeStreams(id);
           } else notifyAccess(id);
           audit(
@@ -795,10 +1115,13 @@ export function createAuthApi({
     /** Runs the unused-file cleanup now (it also runs shortly after start and every 6 hours). */
     collectGarbage: (now) => blobs.collectGarbage(now),
     filesDir: blobs.dir,
+    /** Resolves when background work started by requests (such as reset emails) is done. */
+    idle: () => Promise.allSettled([...background]),
     close: () => {
       clearInterval(heartbeat);
       clearTimeout(firstCleanup);
       clearInterval(cleanupTimer);
+      mail.close();
       for (const stream of streams) stream.res.end();
       streams.clear();
       db.close();

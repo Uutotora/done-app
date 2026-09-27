@@ -1,7 +1,7 @@
 import { createEmptyData } from './store';
 import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
-import { shiftISO, todayISO } from './dates';
+import { fromISODate, shiftISO, todayISO } from './dates';
 import { nowIso, uid } from './utils';
 import type {
   AppNotification,
@@ -11,6 +11,7 @@ import type {
   FileNode,
   ID,
   Item,
+  ItemTemplate,
   Lang,
   Person,
   PlaneIssueLite,
@@ -403,6 +404,30 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
     assigneeId: data.meId,
     tags: ['research'],
   });
+  // Recurring: the next copy appears when this one is done.
+  const toFriday = (5 - fromISODate(today).getDay() + 7) % 7;
+  item({
+    projectId: mobile,
+    type: 'task',
+    title: L('Еженедельный отчет по проекту', 'Weekly project report'),
+    status: 'planned',
+    priority: 'medium',
+    dueDate: d(toFriday),
+    assigneeId: data.meId,
+    tags: ['report'],
+    recurrence: { freq: 'weekly', interval: 1 },
+  });
+  item({
+    projectId: mobile,
+    type: 'task',
+    title: L('Разобрать новые баги из поддержки', 'Triage new bugs from support'),
+    status: 'planned',
+    priority: 'medium',
+    dueDate: d(0),
+    assigneeId: igor,
+    tags: ['support'],
+    recurrence: { freq: 'weekdays', interval: 1 },
+  });
   item({
     projectId: mobile,
     type: 'task',
@@ -652,6 +677,75 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
       it.sprintId = nextSprint;
     }
   }
+
+  // ---- Task templates: two for every project, one for the mobile team
+  const template = (tpl: Omit<ItemTemplate, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => {
+    const id = uid('tp');
+    data.templates[id] = { ...tpl, id, createdBy: data.meId, createdAt: ts, updatedAt: ts };
+  };
+  template({
+    name: L('Баг-репорт', 'Bug report'),
+    icon: '🐞',
+    type: 'bug',
+    priority: 'high',
+    status: 'backlog',
+    tags: ['bug'],
+    content: [
+      B.h3(L('Шаги воспроизведения', 'Steps to reproduce')),
+      B.ol(''),
+      B.h3(L('Ожидаемый результат', 'Expected result')),
+      B.p(),
+      B.h3(L('Фактический результат', 'Actual result')),
+      B.p(),
+      B.h3(L('Окружение', 'Environment')),
+      B.li(L('Версия и устройство: ', 'Version and device: ')),
+    ],
+    subtasks: [L('Воспроизвести', 'Reproduce'), L('Исправить', 'Fix'), L('Проверить на стенде', 'Verify on staging')],
+  });
+  template({
+    name: L('Фича с PRD', 'Feature with PRD'),
+    icon: '✨',
+    type: 'feature',
+    priority: 'medium',
+    status: 'idea',
+    tags: [],
+    content: [
+      B.h2(L('Проблема', 'Problem')),
+      B.p(),
+      B.h2(L('Цели и метрики', 'Goals and metrics')),
+      B.li(''),
+      B.h2(L('Решение', 'Solution')),
+      B.p(),
+      B.h2(L('Не входит в объем', 'Out of scope')),
+      B.li(''),
+    ],
+    subtasks: [
+      L('Написать PRD', 'Write the PRD'),
+      L('Ревью дизайна', 'Design review'),
+      L('Оценить с разработкой', 'Estimate with engineering'),
+      L('Запустить и измерить', 'Launch and measure'),
+    ],
+  });
+  template({
+    projectId: mobile,
+    name: L('Еженедельный отчет', 'Weekly report'),
+    icon: '📊',
+    type: 'task',
+    priority: 'medium',
+    status: 'planned',
+    tags: ['report'],
+    assigneeId: data.meId,
+    recurrence: { freq: 'weekly', interval: 1 },
+    content: [
+      B.h3(L('Что сделано', 'Done this week')),
+      B.li(''),
+      B.h3(L('Что дальше', 'Next week')),
+      B.li(''),
+      B.h3(L('Риски и блокеры', 'Risks and blockers')),
+      B.li(''),
+      B.todo(L('Обновить метрики в дашборде', 'Update the dashboard metrics')),
+    ],
+  });
 
   // ---- Inbox: what teammates sent your way while you were away
   const myName = data.people[data.meId].name;

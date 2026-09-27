@@ -8,23 +8,39 @@ test('welcome, registration draft, durable account, project and viewer access', 
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Done', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('img', { name: 'Done', exact: true })).toHaveCSS('opacity', '1');
-  await expect(page.getByRole('heading', { name: 'Добро пожаловать в Done' }).locator('..')).toHaveCSS('opacity', '1');
+  await expect(page.locator('.auth-flipbook')).toBeVisible();
+  await expect(page.locator('.auth-material')).toHaveClass(/auth-material-water/);
   await page.screenshot({ path: testInfo.outputPath('welcome.png'), animations: 'disabled' });
-  await page.getByRole('button', { name: 'Начать', exact: true }).click();
+  await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
+  await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
   await page.getByLabel('Имя', { exact: true }).fill('Мария');
   await page.getByLabel('Название пространства').fill('Команда QA');
-  await page.getByLabel('Email', { exact: true }).fill('owner@example.test');
+  await expect(page.locator('.auth-flipbook')).toHaveCount(0);
+  const formBounds = await page.locator('.auth-card').boundingBox();
+  const notebookBounds = await page.locator('.auth-stationery-notebook').boundingBox();
+  const planeBounds = await page.locator('.auth-stationery-plane').boundingBox();
+  expect(notebookBounds!.x + notebookBounds!.width).toBeLessThan(formBounds!.x);
+  expect(planeBounds!.x).toBeGreaterThan(formBounds!.x + formBounds!.width);
+
   await page.getByRole('button', { name: 'Назад', exact: true }).click();
   await page.reload();
-  await page.getByRole('button', { name: 'Начать', exact: true }).click();
+  await expect(page.getByLabel('Ваша рабочая почта')).toHaveValue('owner@example.test');
+  await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
   await expect(page.getByLabel('Имя', { exact: true })).toHaveValue('Мария');
   await expect(page.getByLabel('Название пространства')).toHaveValue('Команда QA');
-  await expect(page.getByLabel('Email', { exact: true })).toHaveValue('owner@example.test');
-  await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');
-  await page.getByRole('button', { name: 'Создать аккаунт', exact: true }).click();
+  await page.getByLabel('Придумайте пароль', { exact: true }).fill('Disposable-QA-Password-2026');
+  await page.screenshot({ path: testInfo.outputPath('registration.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: 'Создать пространство', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Мария/ })).toBeVisible();
+  // Setup must switch to login immediately, even without reloading the page.
+  await page.getByRole('button', { name: 'Меню пространства' }).click();
+  await page.getByRole('menuitem', { name: 'Выйти' }).click();
+  await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
+  await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
+  await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Мария/ })).toBeVisible();
+
   await page.getByRole('main').getByRole('button', { name: 'Новый проект', exact: true }).click();
   await page.getByPlaceholder('Новый проект', { exact: true }).fill('Запуск продукта');
   const savedProject = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
@@ -67,12 +83,28 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await expect(page.getByRole('status')).toHaveCount(0, { timeout: 10000 });
   await page.screenshot({ path: testInfo.outputPath('admin.png'), animations: 'disabled' });
 
+  const ownerInviteTab = await page.context().newPage();
+  await ownerInviteTab.goto(invitation);
+  await expect(ownerInviteTab.getByRole('heading', { name: 'Команда QA' })).toBeVisible();
+  await expect(ownerInviteTab.getByText(/Сейчас открыт аккаунт owner@example.test/)).toBeVisible();
+  await ownerInviteTab.close();
+
   const viewerContext = await browser.newContext({ locale: 'ru-RU' });
   const viewer = await viewerContext.newPage();
-  await viewer.goto(invitation);
+  // The server's invitation email wins over a tampered URL query.
+  const invitationUrl = new URL(invitation);
+  invitationUrl.searchParams.set('email', 'wrong@example.test');
+  await viewer.goto(invitationUrl.toString());
+  await expect(viewer.getByRole('heading', { name: 'Команда QA' })).toBeVisible();
+  await expect(viewer.getByText('viewer@example.test', { exact: true })).toBeVisible();
+  await expect(viewer.getByLabel('Название пространства')).toHaveCount(0);
+  await viewer.screenshot({ path: testInfo.outputPath('invitation.png'), animations: 'disabled' });
   await viewer.getByLabel('Имя', { exact: true }).fill('Наблюдатель QA');
-  await viewer.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Viewer-2026');
-  await viewer.getByRole('button', { name: 'Создать аккаунт', exact: true }).click();
+  await viewer.reload();
+  await expect(viewer.getByLabel('Имя', { exact: true })).toHaveValue('Наблюдатель QA');
+  await expect(viewer.getByLabel('Придумайте пароль', { exact: true })).toHaveValue('');
+  await viewer.getByLabel('Придумайте пароль', { exact: true }).fill('Disposable-QA-Viewer-2026');
+  await viewer.getByRole('button', { name: 'Присоединиться к команде', exact: true }).click();
   await viewer.getByRole('complementary').getByRole('link', { name: 'Запуск продукта' }).click();
   await expect(viewer.getByText('Вы можете только просматривать этот проект.')).toBeVisible();
   await expect(viewer.getByRole('button', { name: 'Новый', exact: true })).toHaveCount(0);
@@ -95,12 +127,17 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await page.keyboard.press('Escape');
   const denied = await viewer.request.put('/api/workspace', { headers: { 'x-done-client': 'web' }, data: { revision: 0, data: {} } });
   expect(denied.status()).toBe(403);
+  // Even a signed-in visitor sees a consumed invitation's clear recovery screen.
+  await viewer.goto(invitation);
+  await expect(viewer.getByRole('heading', { name: 'Эта ссылка уже не действует' })).toBeVisible();
+  await viewer.getByRole('button', { name: 'Перейти ко входу' }).click();
+  await expect(viewer.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
   await viewerContext.close();
 
   await page.getByRole('button', { name: 'Меню пространства' }).click();
   await page.getByRole('menuitem', { name: 'Выйти' }).click();
-  await page.getByRole('button', { name: 'Уже есть аккаунт? Войти', exact: true }).click();
-  await page.getByLabel('Email', { exact: true }).fill('owner@example.test');
+  await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
+  await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
   await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await page.getByRole('link', { name: 'Мои задачи', exact: true }).click();

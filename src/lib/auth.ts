@@ -514,7 +514,7 @@ export async function enterAccount(user: AuthUser) {
   unsavedOffline = false;
   streamWorked = false;
   eventsRevivedAt = 0;
-  useAuth.setState({ user, mode: 'loading', error: '', sync: 'saved', syncError: '' });
+  useAuth.setState({ user, setup: false, mode: 'loading', error: '', sync: 'saved', syncError: '' });
   const empty = createEmptyData(useData.getState().prefs.lang);
   let privateSettings = { plane: empty.plane, ai: empty.ai };
   try {
@@ -544,8 +544,8 @@ export async function bootstrapAuth() {
     const result = await api<{ user: AuthUser | null; setup: boolean; mail?: boolean }>('/api/auth/session');
     useAuth.setState({ setup: result.setup, mail: !!result.mail });
     const params = new URLSearchParams(location.search);
-    // A reset link comes first, even in a browser that is signed in or was in the demo.
-    if (params.has('reset')) useAuth.setState({ mode: 'signedOut' });
+    // Invitation and reset links come first, even when already signed in or in the demo.
+    if (params.has('reset') || params.has('invite')) useAuth.setState({ mode: 'signedOut', user: result.user });
     else if (result.user) await enterAccount(result.user);
     else if (sessionStorage.getItem('done:mode') === 'local' && !params.has('invite')) await enterLocal();
     else useAuth.setState({ mode: 'signedOut' });
@@ -553,11 +553,24 @@ export async function bootstrapAuth() {
     useAuth.setState({ mode: 'signedOut', error: (e as Error).message });
   }
 }
-export async function enterLocal() {
+export async function enterLocal(withDemo = false) {
   sessionStorage.setItem('done:mode', 'local');
   stopSync?.();
   setRemoteStorage(false);
   await useData.persist.rehydrate();
+  if (withDemo && !useData.getState().onboarded) {
+    const { createSampleData } = await import('./seed');
+    const { putFileBlob } = await import('./storage');
+    const lang = useData.getState().prefs.lang;
+    const { data, blobs } = createSampleData({
+      lang,
+      name: lang === 'ru' ? 'Гость' : 'Guest',
+      role: '',
+      workspaceName: lang === 'ru' ? 'Демо Done' : 'Done demo',
+    });
+    await Promise.all(blobs.map(([id, blob]) => putFileBlob(id, blob)));
+    useData.getState().replaceAll(data);
+  }
   useAuth.setState({ mode: 'local', user: null, error: '' });
 }
 export async function logout() {

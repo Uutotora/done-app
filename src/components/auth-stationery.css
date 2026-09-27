@@ -1,0 +1,126 @@
+.auth-stationery {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  mix-blend-mode: multiply;
+}
+
+.auth-stationery-object {
+  --stationery-angle: 0deg;
+  --stationery-lift: -14px;
+  --stationery-drift: 5px;
+  position: absolute;
+  display: block;
+  width: clamp(145px, 14vw, 195px);
+  aspect-ratio: 1;
+  background-image: url('/illustrations/floating-stationery.png');
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  transform-origin: center;
+  animation: auth-stationery-float 10s ease-in-out infinite;
+}
+
+/* The inner edge stays at least 245px from the centre, clear of the form. */
+.auth-stationery-notebook {
+  --stationery-angle: -7deg;
+  --stationery-lift: -16px;
+  top: calc(50% - 215px);
+  right: calc(50% + 245px);
+  background-position: 0% 0%;
+  animation-duration: 11s;
+  animation-delay: -3s;
+}
+
+.auth-stationery-plane {
+  --stationery-angle: 8deg;
+  --stationery-lift: -18px;
+  --stationery-drift: -6px;
+  top: calc(50% - 165px);
+  left: calc(50% + 245px);
+  background-position: 100% 0%;
+  animation-duration: 9s;
+  animation-delay: -5s;
+}
+
+.auth-stationery-notes {
+  --stationery-angle: 4deg;
+  --stationery-lift: -12px;
+  --stationery-drift: -4px;
+  top: calc(50% + 80px);
+  right: calc(50% + 265px);
+  background-position: 0% 100%;
+  animation-duration: 12s;
+  animation-delay: -8s;
+}
+
+.auth-stationery-clip {
+  --stationery-angle: -6deg;
+  --stationery-lift: -15px;
+  top: calc(50% + 115px);
+  left: calc(50% + 265px);
+  background-position: 100% 100%;
+  animation-duration: 10s;
+  animation-delay: -1s;
+}
+
+.dark .auth-stationery {
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+@keyframes auth-stationery-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(var(--stationery-angle));
+  }
+  50% {
+    transform: translate3d(var(--stationery-drift), var(--stationery-lift), 0) rotate(calc(var(--stationery-angle) + 2deg));
+  }
+}
+
+@media (max-width: 980px) {
+  .auth-stationery {
+    position: relative;
+    inset: auto;
+    flex-shrink: 0;
+    width: 250px;
+    max-width: 100%;
+    height: 120px;
+    margin-bottom: 16px;
+  }
+
+  .auth-stationery-object {
+    width: 108px;
+  }
+
+  .auth-stationery-notebook {
+    top: 8px;
+    right: auto;
+    left: 8px;
+  }
+
+  .auth-stationery-plane {
+    top: 10px;
+    left: auto;
+    right: 7px;
+  }
+
+  .auth-stationery-notes,
+  .auth-stationery-clip {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-stationery-object {
+    animation: none;
+    transform: rotate(var(--stationery-angle));
+  }
+}
+
+@media (forced-colors: active) {
+  .auth-stationery {
+    visibility: hidden;
+  }
+}

@@ -1,18 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/** Opens the demo workspace through onboarding and waits for Home. */
+/** Opens the demo immediately, without a second account-like onboarding. */
 async function startDemo(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Попробовать демо' }).click();
-  await page.getByRole('button', { name: 'Начать' }).click();
-  await page.getByPlaceholder('Ваше имя').fill('Тест Тестов');
-  await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Продолжить' }).click();
-  await page.getByPlaceholder('Например, Команда продукта').fill('QA');
-  await page.getByRole('button', { name: 'Продолжить' }).click();
-  await page.getByRole('button', { name: 'Поехали' }).click();
-
-  await expect(page.getByRole('heading', { name: /Тест/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Посмотреть демо' }).click();
+  await expect(page.getByRole('heading', { name: /Гость/ })).toBeVisible();
 }
 
 test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) => {
@@ -111,10 +103,10 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
   await page.getByRole('button', { name: 'Развернуть сайдбар', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Проекты', exact: true })).toBeVisible();
   await page.getByRole('complementary', { name: 'Проекты', exact: true }).getByRole('link', { name: 'Главная', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /Тест/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Гость/ })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Проекты', exact: true })).toBeHidden();
   await expect(page.locator('.workspace-sidebar')).toHaveCSS('width', '0px');
-  await expect(page.getByRole('heading', { name: /Тест/ }).locator('..')).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('heading', { name: /Гость/ }).locator('..')).toHaveCSS('opacity', '1');
   await page.screenshot({ path: testInfo.outputPath('mobile-home.png'), animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);

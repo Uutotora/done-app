@@ -152,6 +152,7 @@ export function createAuthApi({
   // Password reset: requests per IP and per address, and uses of reset links per IP.
   const resetRequestsByIp = createLimiter(20, 15 * 60000);
   const resetRequestsByEmail = createLimiter(5, 15 * 60000);
+  const invitationLookups = createLimiter(40, 15 * 60000);
   const resetLinksByIp = createLimiter(30, 15 * 60000);
   const mailTests = createLimiter(5, 15 * 60000);
   const background = new Set();
@@ -498,6 +499,26 @@ export function createAuthApi({
       let user = authenticate(req);
       if (path === '/api/auth/session' && req.method === 'GET')
         return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get(), mail: mail.configured });
+      // A token proves possession of the invitation; email query parameters are never trusted.
+      if (path === '/api/auth/invitation' && req.method === 'POST') {
+        if (!invitationLookups(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const input = await body(req, 4096);
+        if (typeof input.token !== 'string' || input.token.length > 256) fail(410, 'This invitation is invalid or has expired');
+        const invitation = db
+          .prepare(
+            'SELECT invites.*, users.name AS inviter FROM invites LEFT JOIN users ON users.id=invites.created_by WHERE invites.token=? AND invites.expires>?',
+          )
+          .get(hash(input.token), Date.now());
+        if (!invitation || db.prepare('SELECT id FROM users WHERE email=?').get(invitation.email))
+          fail(410, 'This invitation is invalid or has expired');
+        return send(res, 200, {
+          email: invitation.email,
+          workspace: readWorkspace()?.data.workspace?.name || 'Done',
+          inviter: invitation.inviter,
+          role: normalizeRole(invitation.role),
+          expires: invitation.expires,
+        });
+      }
       if (['/api/auth/register', '/api/auth/login'].includes(path) && req.method === 'POST') {
         const input = await body(req);
         const email = String(input.email ?? '')

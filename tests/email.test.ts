@@ -226,6 +226,23 @@ describe('email on the server', () => {
     expect((await s.call('/api/admin/invites/resend', 'POST', { email: 'again@example.com' })).status).toBe(404);
   });
 
+  it('previews only live invitations without exposing account or project data', async () => {
+    const invite = await (await s.call('/api/admin/invites', 'POST', { email: 'preview@example.com', role: 'viewer' })).json();
+    const preview = await s.call('/api/auth/invitation', 'POST', { token: invite.token }, '');
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get('cache-control')).toContain('no-store');
+    const details = await preview.json();
+    expect(details).toMatchObject({ email: 'preview@example.com', workspace: 'Acme <b>&</b> "Co"', role: 'viewer' });
+    expect(Object.keys(details).sort()).toEqual(['email', 'expires', 'inviter', 'role', 'workspace']);
+    const rotated = await (await s.call('/api/admin/invites/resend', 'POST', { email: 'preview@example.com' })).json();
+    expect((await s.call('/api/auth/invitation', 'POST', { token: invite.token }, '')).status).toBe(410);
+    expect((await s.call('/api/auth/invitation', 'POST', { token: rotated.token }, '')).status).toBe(200);
+    await s.call('/api/admin/invites', 'DELETE', { email: 'preview@example.com' });
+    expect((await s.call('/api/auth/invitation', 'POST', { token: rotated.token }, '')).status).toBe(410);
+    expect((await s.call('/api/auth/invitation', 'POST', { token: 'missing' }, '')).status).toBe(410);
+    expect((await s.call('/api/auth/invitation', 'POST', { token: {} }, '')).status).toBe(410);
+  });
+
   it('lets only those who could invite resend an invitation', async () => {
     await s.call('/api/admin/invites', 'POST', { emails: ['boss@example.com'], role: 'admin' });
     expect((await s.call('/api/admin/invites/resend', 'POST', { email: 'boss@example.com' }, 'ada')).status).toBe(403);

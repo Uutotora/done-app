@@ -5,6 +5,7 @@ import { setMutationPolicy } from './mutationPolicy';
 import { toast } from './ui';
 import { usePresence, type Peer } from './presence';
 import { applyShared, diffShared } from '../../server/merge.mjs';
+import { applyDelta, type RevisionEvent } from './liveDelta';
 import type { DataState } from './types';
 
 /** Workspace roles, strongest first. "owner" is shown as super admin. */
@@ -196,6 +197,28 @@ function schedulePull(delay = 150) {
   pullTimer = setTimeout(() => void exclusive(() => pull().catch(handleSyncError)), delay);
 }
 
+/**
+ * Someone else saved. A delta that continues from the revision this tab has is applied in place, with unsaved
+ * local edits replayed on top; without one (too large, older server, missed revisions) the workspace is reloaded.
+ * Runs in turn with saves, so a delta never lands in the middle of one.
+ */
+export function receiveRevision(event: RevisionEvent): Promise<void> {
+  if (event.tab === TAB_ID || event.revision === revision) return Promise.resolve();
+  const delta = event.delta;
+  if (!delta || typeof event.baseRevision !== 'number') {
+    schedulePull();
+    return Promise.resolve();
+  }
+  return exclusive(async () => {
+    const user = useAuth.getState().user;
+    if (useAuth.getState().mode !== 'signedIn' || !user || !base) return;
+    // Already included: this tab saved or reloaded after the event was sent.
+    if (event.revision <= revision) return;
+    if (event.baseRevision !== revision) return pull();
+    applyRemote(applyDelta(base, delta) as Partial<DataState>, user, event.revision);
+  }).catch(handleSyncError);
+}
+
 let lastPresencePath = '';
 /** Tells teammates which page this member has open. */
 export function reportPresence(path = lastPresencePath) {
@@ -224,10 +247,7 @@ function startSync() {
   let events: EventSource | undefined;
   if (typeof EventSource !== 'undefined') {
     events = new EventSource('/api/events');
-    events.addEventListener('revision', (e) => {
-      const { revision: rev, tab } = JSON.parse((e as MessageEvent).data) as { revision: number; tab?: string };
-      if (tab !== TAB_ID && rev !== revision) schedulePull();
-    });
+    events.addEventListener('revision', (e) => void receiveRevision(JSON.parse((e as MessageEvent).data) as RevisionEvent));
     // An administrator changed this member's role or projects: reload what they can see.
     events.addEventListener('access', () => void exclusive(() => pull(true, true).catch(handleSyncError)));
     events.addEventListener('presence', (e) => {

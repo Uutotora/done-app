@@ -8,12 +8,14 @@ import {
   applyChanges,
   canReadProject,
   canWriteProject,
+  deltaIndex,
   isAdmin,
   mergeState,
   normalizeRole,
   projectLevel,
   sharedState,
   validateState,
+  visibleDelta,
   visibleState,
 } from './access.mjs';
 import {
@@ -26,6 +28,7 @@ import {
   uploadReferences,
   validBlobId,
 } from './blobs.mjs';
+import { contentEvents, isContentAction } from './contentAudit.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -110,19 +113,57 @@ export function createAuthApi({
   firstCleanup.unref?.();
   const cleanupTimer = setInterval(cleanup, CLEANUP_EVERY);
   cleanupTimer.unref?.();
+  // The security log holds access events (sign-ins, invitations, roles) and content events (created, deleted, renamed).
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('audit') WHERE name='kind'").get()) {
+    db.exec("ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'access'; UPDATE audit SET kind='content' WHERE action='project.created';");
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS audit_kind ON audit(kind, id)');
   const attempts = new Map();
   const audit = (user, action, detail = '') =>
-    db.prepare('INSERT INTO audit(actor,action,detail,at) VALUES(?,?,?,?)').run(user, action, detail, new Date().toISOString());
+    db
+      .prepare('INSERT INTO audit(actor,action,detail,at,kind) VALUES(?,?,?,?,?)')
+      .run(user, action, detail, new Date().toISOString(), isContentAction(action) ? 'content' : 'access');
+  const AUDIT_PAGE = 100;
+  // Renames arrive a few characters at a time; a burst of renames of one record by one person is kept as one entry.
+  const RENAME_WINDOW = 5 * 60000;
+  const renames = new Map();
+  /** Writes the content events of one save. Runs inside the transaction that stores the workspace. */
+  const auditContent = (actorId, events) => {
+    const now = Date.now();
+    if (renames.size > 1000) for (const [key, r] of renames) if (now - r.at > RENAME_WINDOW) renames.delete(key);
+    for (const event of events) {
+      const previous = event.rename && renames.get(event.target);
+      if (previous && previous.actor === actorId && now - previous.at < RENAME_WINDOW) {
+        previous.at = now;
+        // A page named right after it was created: the creation shows the name.
+        if (previous.created) db.prepare('UPDATE audit SET detail=? WHERE id=?').run(`${event.rename.to}${event.rename.suffix}`, previous.id);
+        // Renamed back to where it started: nothing changed in the end.
+        else if (previous.from === event.rename.to) {
+          db.prepare('DELETE FROM audit WHERE id=?').run(previous.id);
+          renames.delete(event.target);
+        } else db.prepare('UPDATE audit SET detail=? WHERE id=?').run(`${previous.from} → ${event.rename.to}${event.rename.suffix}`, previous.id);
+        continue;
+      }
+      const row = audit(actorId, event.action, event.detail);
+      const id = Number(row.lastInsertRowid);
+      if (event.rename) renames.set(event.target, { id, actor: actorId, from: event.rename.from, at: now });
+      else if (/^(project|doc)\.created$/.test(event.action)) renames.set(event.target, { id, actor: actorId, created: true, at: now });
+      else if (event.target) renames.delete(event.target);
+    }
+  };
   // Live updates: every signed-in tab keeps one Server-Sent Events stream open.
   const streams = new Set();
   const presence = new Map();
-  const emit = (stream, event, data) => {
+  const emitRaw = (stream, event, json) => {
     try {
-      stream.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      stream.res.write(`event: ${event}\ndata: ${json}\n\n`);
     } catch {
       /* the socket is closing */
     }
   };
+  const emit = (stream, event, data) => emitRaw(stream, event, JSON.stringify(data));
+  /** Largest live update sent to one tab; bigger changes make it reload the workspace instead. */
+  const DELTA_LIMIT = 512 * 1024;
   // Which project a task or page belongs to, rebuilt only when the workspace revision changes.
   let pathIndex = { revision: -1, items: new Map(), docs: new Map() };
   const currentPathIndex = () => {
@@ -165,8 +206,44 @@ export function createAuthApi({
       });
     }
   };
-  const broadcastRevision = (revision, actorId, tab) => {
-    for (const stream of streams) emit(stream, 'revision', { revision, actorId, tab });
+  /**
+   * Tells every open tab about a new revision. With `write` ({ prev, next, changed }) each tab also receives
+   * `delta`: only the changes its member may see, so it can update without downloading the whole workspace.
+   * A delta that is too large or cannot be built is left out and that tab reloads instead.
+   */
+  const broadcastRevision = (revision, actorId, tab, write) => {
+    if (!streams.size) return;
+    const head = { revision, baseRevision: revision - 1, actorId, tab };
+    const plain = JSON.stringify(head);
+    // Access may have changed since a stream was opened: always use the current role and projects.
+    const members = write
+      ? new Map(
+          db
+            .prepare('SELECT * FROM users')
+            .all()
+            .map((row) => [row.id, publicUser(row)]),
+        )
+      : null;
+    let index;
+    const payloads = new Map();
+    const payloadFor = (stream) => {
+      const user = members?.get(stream.user.id);
+      if (!user || user.disabled) return plain;
+      stream.user = user;
+      if (!payloads.has(user.id)) {
+        let payload = plain;
+        try {
+          index ??= deltaIndex(write.prev, write.next);
+          const json = JSON.stringify({ ...head, delta: visibleDelta(write.prev, write.next, user, write.changed, index) });
+          if (Buffer.byteLength(json) <= DELTA_LIMIT) payload = json;
+        } catch (error) {
+          console.error('Done live update error:', error.message);
+        }
+        payloads.set(user.id, payload);
+      }
+      return payloads.get(user.id);
+    };
+    for (const stream of streams) emitRaw(stream, 'revision', payloadFor(stream));
   };
   const closeStreams = (userId) => {
     for (const stream of [...streams]) if (stream.user.id === userId) stream.res.end();
@@ -316,7 +393,12 @@ export function createAuthApi({
   const activeOwners = () => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='owner' AND disabled=0").get().n;
   /** Tells a member's open tabs to reload their access right away. */
   const notifyAccess = (userId) => {
-    for (const stream of streams) if (stream.user.id === userId) emit(stream, 'access', { at: Date.now() });
+    const fresh = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(userId));
+    for (const stream of streams) {
+      if (stream.user.id !== userId) continue;
+      if (fresh) stream.user = fresh;
+      emit(stream, 'access', { at: Date.now() });
+    }
   };
   async function authenticatedBody(req, limit) {
     const input = await body(req, limit);
@@ -389,7 +471,9 @@ export function createAuthApi({
           if (!setup && !invite) fail(403, 'An invitation is required');
           if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) fail(409, 'Account already exists');
           const id = randomUUID();
-          let data = setup ? sharedState(input.data) : readWorkspace().data;
+          const current = setup ? null : readWorkspace();
+          // A copy, so the live update can tell teammates what changed.
+          let data = setup ? sharedState(input.data) : { ...current.data, people: { ...current.data.people } };
           validateState(data);
           const color = PERSON_COLORS[Object.keys(data.people).length % PERSON_COLORS.length];
           data.people[id] = { id, name, email, color: setup ? 'blue' : color };
@@ -418,7 +502,8 @@ export function createAuthApi({
           }
           user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
           audit(id, 'account.created', email);
-          if (!setup) broadcastRevision(readWorkspace().revision, id);
+          if (!setup)
+            broadcastRevision(current.revision + 1, id, undefined, { prev: current.data, next: data, changed: { records: { people: [id] } } });
         }
         startSession(user, res);
         return send(res, 200, { user });
@@ -493,25 +578,42 @@ export function createAuthApi({
           const input = await authenticatedBody(req);
           workspace = readWorkspace();
           let merged;
+          const info = {};
           if (req.method === 'PUT') {
             // Full snapshots can only be saved on top of the revision they were loaded from.
             if (input.revision !== workspace.revision) fail(409, 'Workspace changed. Reload before saving.');
-            merged = mergeState(workspace.data, sharedState(input.data), user);
+            merged = mergeState(workspace.data, sharedState(input.data), user, info);
           } else {
             // Change sets merge field by field, so concurrent edits by teammates are kept.
-            const info = {};
             merged = applyChanges(workspace.data, input.changes, user, info);
-            // Someone limited to some projects keeps access to the projects they create.
-            if (info.createdProjects?.size && user.projectIds !== null && !isAdmin(user)) {
+          }
+          // Someone limited to some projects keeps access to the projects they create.
+          const grantCreated = info.createdProjects?.size && user.projectIds !== null && !isAdmin(user);
+          let events = [];
+          try {
+            events = contentEvents(workspace.data, merged, info.changed, user.id);
+          } catch (error) {
+            // The log must never cost anyone their work.
+            console.error('Done audit error:', error.message);
+          }
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
+            if (grantCreated) {
               const ids = [...new Set([...user.projectIds, ...info.createdProjects])];
               db.prepare('UPDATE users SET project_ids=? WHERE id=?').run(JSON.stringify(ids), user.id);
-              for (const pid of info.createdProjects) audit(user.id, 'project.created', merged.projects[pid]?.name ?? pid);
             }
+            auditContent(user.id, events);
+            db.exec('COMMIT');
+          } catch (e) {
+            db.exec('ROLLBACK');
+            throw e;
           }
-          db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(merged));
           const revision = workspace.revision + 1;
           const tab = typeof req.headers['x-done-tab'] === 'string' ? req.headers['x-done-tab'].slice(0, 64) : undefined;
-          broadcastRevision(revision, user.id, tab);
+          broadcastRevision(revision, user.id, tab, info.changed && { prev: workspace.data, next: merged, changed: info.changed });
+          // Their open tabs learn about the new project access.
+          if (grantCreated) notifyAccess(user.id);
           return send(res, 200, { revision });
         }
       }
@@ -678,12 +780,21 @@ export function createAuthApi({
                 invitedBy: i.invited_by,
               })),
           });
-        if (path === '/api/admin/audit' && req.method === 'GET')
-          return send(res, 200, {
-            events: db
-              .prepare('SELECT audit.*, users.name FROM audit LEFT JOIN users ON users.id=audit.actor ORDER BY audit.id DESC LIMIT 200')
-              .all(),
-          });
+        if (path === '/api/admin/audit' && req.method === 'GET') {
+          // Newest first, a page at a time: ?before=<id> continues after the last entry shown, ?kind=access|content filters.
+          const query = new URL(req.url || '/', 'http://localhost').searchParams;
+          const before = query.has('before') ? Number(query.get('before')) : null;
+          const kind = query.get('kind');
+          if (before !== null && !(Number.isSafeInteger(before) && before > 0)) fail(400, 'Invalid page');
+          if (kind !== null && !['access', 'content'].includes(kind)) fail(400, 'Invalid filter');
+          const where = [...(before !== null ? ['audit.id<?'] : []), ...(kind !== null ? ['audit.kind=?'] : [])];
+          const rows = db
+            .prepare(
+              `SELECT audit.id,audit.actor,audit.action,audit.detail,audit.at,audit.kind,users.name FROM audit LEFT JOIN users ON users.id=audit.actor${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY audit.id DESC LIMIT ?`,
+            )
+            .all(...(before !== null ? [before] : []), ...(kind !== null ? [kind] : []), AUDIT_PAGE + 1);
+          return send(res, 200, { events: rows.slice(0, AUDIT_PAGE), more: rows.length > AUDIT_PAGE });
+        }
         if (path === '/api/admin/invites' && req.method === 'POST') {
           const input = await authenticatedBody(req);
           const role = normalizeRole(input.role);
@@ -733,7 +844,7 @@ export function createAuthApi({
           if (req.method === 'DELETE') {
             if (leavesNoOwner) fail(400, 'The workspace needs at least one owner');
             const workspace = readWorkspace();
-            const data = workspace.data;
+            const data = { ...workspace.data, people: { ...workspace.data.people } };
             // The person stays on past work, marked as no longer in the workspace.
             if (data.people[id]) data.people[id] = { ...data.people[id], removed: true };
             db.exec('BEGIN IMMEDIATE');
@@ -749,7 +860,11 @@ export function createAuthApi({
             closeStreams(id);
             presence.delete(id);
             audit(user.id, 'member.removed', target.email);
-            broadcastRevision(workspace.revision + 1, user.id);
+            broadcastRevision(workspace.revision + 1, user.id, undefined, {
+              prev: workspace.data,
+              next: data,
+              changed: { records: { people: data.people[id] ? [id] : [] } },
+            });
             return send(res, 200, { ok: true });
           }
           const role = input.role === undefined ? target.role : normalizeRole(input.role);

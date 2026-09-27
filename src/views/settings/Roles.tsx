@@ -5,6 +5,7 @@ import { useLang, useT, type TKey } from '@/lib/i18n';
 import { formatDateTime } from '@/lib/dates';
 import { ROLE_ORDER } from '@/lib/members';
 import { cn, matches } from '@/lib/utils';
+import { Button } from '@/components/ui/Button';
 import { levelLabel, roleLabel } from '@/components/access/AccessControls';
 import { H, H2 } from './common';
 
@@ -115,19 +116,76 @@ const AUDIT_ACTIONS = new Set([
   'member.removed',
   'project.access',
   'project.created',
+  'project.deleted',
+  'project.renamed',
+  'project.archived',
+  'project.unarchived',
+  'task.created',
+  'task.deleted',
+  'doc.created',
+  'doc.deleted',
+  'doc.renamed',
+  'file.created',
+  'file.deleted',
+  'folder.created',
+  'folder.deleted',
+  'link.created',
+  'link.deleted',
+  'sprint.created',
+  'sprint.deleted',
+  'comment.removed',
+  'trash.restored',
+  'trash.purged',
+  'trash.emptied',
 ]);
+
+type AuditFilter = 'all' | 'access' | 'content';
+const AUDIT_FILTERS: AuditFilter[] = ['all', 'access', 'content'];
 
 export function AuditPage() {
   const t = useT();
   const lang = useLang();
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [filter, setFilter] = useState<AuditFilter>('all');
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const page = (before?: number) =>
+    api<{ events: AuditEvent[]; more?: boolean }>(
+      `/api/admin/audit?${new URLSearchParams({
+        ...(filter === 'all' ? {} : { kind: filter }),
+        ...(before ? { before: String(before) } : {}),
+      })}`,
+    );
   useEffect(() => {
-    api<{ events: AuditEvent[] }>('/api/admin/audit')
-      .then((r) => setEvents(r.events))
-      .catch((e: Error) => setError(e.message));
-  }, []);
+    let live = true;
+    setEvents(null);
+    setError('');
+    page()
+      .then((r) => {
+        if (!live) return;
+        setEvents(r.events);
+        setMore(!!r.more);
+      })
+      .catch((e: Error) => live && setError(e.message));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+  const loadMore = () => {
+    const last = events?.[events.length - 1];
+    if (!last || loadingMore) return;
+    setLoadingMore(true);
+    page(last.id)
+      .then((r) => {
+        setEvents((prev) => [...(prev ?? []), ...r.events.filter((e) => !prev?.some((p) => p.id === e.id))]);
+        setMore(!!r.more);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoadingMore(false));
+  };
   // Details keep raw role and level names; show them the way the rest of the app does.
   const detail = (text: string) =>
     text
@@ -142,8 +200,18 @@ export function AuditPage() {
               : part,
       )
       .join(' · ');
-  const label = (action: string) => (AUDIT_ACTIONS.has(action) ? t(`audit.${action}` as TKey) : action);
-  const shown = (events ?? []).filter((e) => matches(`${e.name ?? ''} ${label(e.action)} ${detail(e.detail)}`, query));
+  const label = (action: string) => {
+    const base = action.endsWith('.more') ? action.slice(0, -5) : action;
+    return AUDIT_ACTIONS.has(base) ? t(`audit.${base}` as TKey) : action;
+  };
+  // Bulk actions are summarised by the server: "<action>.more" carries how many entries were folded.
+  const describe = (e: AuditEvent) =>
+    e.action.endsWith('.more')
+      ? t('audit.andMore', { n: e.detail })
+      : e.action === 'trash.emptied'
+        ? t('audit.objects', { n: e.detail })
+        : detail(e.detail);
+  const shown = (events ?? []).filter((e) => matches(`${e.name ?? ''} ${label(e.action)} ${describe(e)}`, query));
   return (
     <>
       <H
@@ -163,6 +231,22 @@ export function AuditPage() {
       >
         {t('audit.title')}
       </H>
+      <div role="tablist" className="mb-3 flex gap-1">
+        {AUDIT_FILTERS.map((f) => (
+          <button
+            key={f}
+            role="tab"
+            aria-selected={filter === f}
+            onClick={() => setFilter(f)}
+            className={cn(
+              'h-7 rounded-md px-2.5 text-[13px] transition-colors',
+              filter === f ? 'bg-hover text-fg' : 'text-fg-3 hover:bg-hover hover:text-fg',
+            )}
+          >
+            {t(`audit.filter.${f}`)}
+          </button>
+        ))}
+      </div>
       {error && <p className="text-[13px] text-[var(--c-red-text)]">{error}</p>}
       {!events && !error && <div className="py-10 text-center text-[13px] text-fg-3">{t('common.loading')}</div>}
       {events && shown.length === 0 && <div className="py-10 text-center text-[13px] text-fg-3">{t('audit.empty')}</div>}
@@ -177,12 +261,19 @@ export function AuditPage() {
             <Grid key={e.id}>
               <div className="min-w-0">
                 <div className="truncate text-[14px]">{label(e.action)}</div>
-                {e.detail && <div className="truncate text-[12.5px] text-fg-3">{detail(e.detail)}</div>}
+                {e.detail && <div className="truncate text-[12.5px] text-fg-3">{describe(e)}</div>}
               </div>
               <span className="truncate text-[13.5px] text-fg-2">{e.name ?? '—'}</span>
               <span className="text-right text-[12.5px] tabular-nums text-fg-3">{formatDateTime(e.at, lang)}</span>
             </Grid>
           ))}
+        </div>
+      )}
+      {more && (
+        <div className="flex justify-center pt-3">
+          <Button size="sm" variant="ghost" loading={loadingMore} onClick={loadMore}>
+            {t('audit.more')}
+          </Button>
         </div>
       )}
     </>

@@ -1,3 +1,4 @@
+import { StatePanel } from '@/components/StatePanel';
 import { AnimatePresence, motion } from 'motion/react';
 import { RotateCcw, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -51,10 +52,20 @@ export function TrashButton() {
         </div>
         <div className="min-h-[120px] flex-1 overflow-y-auto p-1">
           {list.length === 0 && (
-            <div className="flex h-[140px] flex-col items-center justify-center gap-2 text-[13.5px] text-fg-3">
-              <Trash2 size={28} className="text-fg-4" />
-              {t('trash.empty')}
-            </div>
+            <StatePanel
+              compact
+              illustration={q ? 'lost' : 'quiet'}
+              title={q ? t('cmd.noResults') : t('trash.empty')}
+              action={
+                q ? (
+                  <button className="state-link" onClick={() => setQ('')}>
+                    {lang === 'ru' ? 'Сбросить поиск' : 'Clear search'}
+                  </button>
+                ) : undefined
+              }
+            >
+              {!q && t('trash.hint')}
+            </StatePanel>
           )}
           <AnimatePresence initial={false}>
             {list.map((e) => (

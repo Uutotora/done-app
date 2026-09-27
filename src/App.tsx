@@ -23,6 +23,7 @@ import { CalendarView } from '@/views/Calendar';
 import { DocsView } from '@/views/Docs';
 import { FilesView } from '@/views/Files';
 import { NotFound } from '@/views/NotFound';
+import { PageLoading } from '@/components/PageFeedback';
 
 const MapView = lazy(() => import('@/views/ProjectMap'));
 const DocPage = lazy(() => import('@/views/DocPage'));
@@ -123,5 +124,5 @@ export function App() {
 }
 
 function Lazy({ el }: { el: React.ReactNode }) {
-  return <Suspense fallback={<div className="p-24" />}>{el}</Suspense>;
+  return <Suspense fallback={<PageLoading />}>{el}</Suspense>;
 }

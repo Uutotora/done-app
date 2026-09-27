@@ -1,4 +1,5 @@
-import { CheckCheck, ChevronDown, FolderOpen, ListTodo, MoreHorizontal, Plus, Search, X } from 'lucide-react';
+import { StatePanel } from '@/components/StatePanel';
+import { ChevronDown, FolderOpen, ListTodo, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
@@ -199,14 +200,24 @@ export function MyWork() {
       </div>
       <div className="full-width min-h-0 flex-1 overflow-y-auto pb-16 pt-4">
         {items.length === 0 && (
-          <div className="flex flex-col items-center rounded-lg border border-dashed border-line py-16 text-center">
-            <CheckCheck size={30} strokeWidth={1.4} className="mb-3 text-fg-4" />
-            <h2 className="font-medium">{t('work.empty')}</h2>
-            <p className="mt-1 max-w-sm text-[13px] text-fg-3">{t('work.emptyHint')}</p>
-            <Button className="mt-4" variant="ghost" onClick={() => change({ view: 'active', project: '', q: '', assignee: '' })}>
-              {t('work.reset')}
-            </Button>
-          </div>
+          <StatePanel
+            illustration={search || projectId || assignee ? 'lost' : 'quiet'}
+            title={t('work.empty')}
+            action={
+              <>
+                <button className="state-primary" onClick={() => create()}>
+                  {t('common.new')}
+                </button>
+                {(search || projectId || assignee || view !== 'active') && (
+                  <button className="state-link" onClick={() => change({ view: 'active', project: '', q: '', assignee: '' })}>
+                    {t('work.reset')}
+                  </button>
+                )}
+              </>
+            }
+          >
+            {t('work.emptyHint')}
+          </StatePanel>
         )}
         {WORK_BUCKETS.map((bucket) => {
           const group = items.filter((i) => workBucket(i, today) === bucket);

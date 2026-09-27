@@ -1,5 +1,6 @@
+import { StatePanel } from '@/components/StatePanel';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlarmClock, Archive, ArchiveRestore, CalendarClock, CheckCheck, Circle, CircleCheck, Inbox as InboxIcon } from 'lucide-react';
+import { AlarmClock, Archive, ArchiveRestore, CalendarClock, CheckCheck, Circle, CircleCheck } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { isToday, isYesterday, parseISO } from 'date-fns';
@@ -21,6 +22,8 @@ type Tab = 'unread' | 'all' | 'archived';
 
 export function InboxView() {
   const t = useT();
+  const ru = useLang() === 'ru';
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab = (['unread', 'all', 'archived'].includes(params.get('tab') ?? '') ? params.get('tab') : 'unread') as Tab;
   const mine = useMyNotifications();
@@ -130,15 +133,23 @@ export function InboxView() {
           </div>
 
           {list.length === 0 ? (
-            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center py-20 text-center">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-hover text-fg-3">
-                <InboxIcon size={26} strokeWidth={1.6} />
-              </div>
-              <h2 className="text-[15px] font-semibold">
-                {tab === 'unread' ? t('inbox.emptyUnread') : tab === 'archived' ? t('inbox.emptyArchived') : t('inbox.emptyAll')}
-              </h2>
-              {tab === 'unread' && <p className="mt-1 max-w-sm text-[13px] text-fg-3">{t('inbox.emptyUnreadHint')}</p>}
-            </motion.div>
+            <StatePanel
+              illustration={tab === 'unread' ? 'quiet' : tab === 'archived' ? 'workspace' : 'letter'}
+              title={tab === 'unread' ? t('inbox.emptyUnread') : tab === 'archived' ? t('inbox.emptyArchived') : t('inbox.emptyAll')}
+              action={
+                tab === 'unread' ? (
+                  <button className="state-link" onClick={() => navigate('/my-work')}>
+                    {ru ? 'К моим задачам' : 'Go to my tasks'}
+                  </button>
+                ) : undefined
+              }
+            >
+              {tab === 'archived'
+                ? ru
+                  ? 'Уведомления, которые вы уберёте в архив, останутся здесь. К ним всегда можно вернуться.'
+                  : 'Notifications you archive will stay here. You can come back to them anytime.'
+                : t('inbox.emptyUnreadHint')}
+            </StatePanel>
           ) : (
             <div ref={listRef} className="pt-2">
               {groups.map((g) => (

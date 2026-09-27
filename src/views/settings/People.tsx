@@ -1,3 +1,4 @@
+import { StateIllustration } from '@/components/StatePanel';
 import {
   AlertCircle,
   Check,
@@ -463,6 +464,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
       {result ? (
         <div className="flex max-h-[86vh] flex-col">
           <div className="border-b border-line px-5 py-4">
+            <StateIllustration scene="letter" className="mx-auto mb-3 !w-[170px]" />
             <div className="flex items-center gap-2 text-[15px] font-semibold">
               {failedAll ? (
                 <AlertCircle size={20} className="shrink-0 text-[var(--c-red-text)]" />

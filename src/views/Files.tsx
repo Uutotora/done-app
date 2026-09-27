@@ -1,3 +1,4 @@
+import { StatePanel } from '@/components/StatePanel';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowUpDown,
@@ -285,6 +286,7 @@ export function FilesView() {
           {showDrives && <DrivesRow />}
           {visible.length === 0 ? (
             <EmptyDrive
+              onClear={() => setQ('')}
               q={q}
               onUpload={() => inputRef.current?.click()}
               onFolder={newFolder}
@@ -467,34 +469,55 @@ function DriveCard({ project, count }: { project: Project; count: number }) {
   );
 }
 
-function EmptyDrive({ q, onUpload, onFolder, onLink }: { q: string; onUpload: () => void; onFolder: () => void; onLink: () => void }) {
+function EmptyDrive({
+  q,
+  onUpload,
+  onFolder,
+  onLink,
+  onClear,
+}: {
+  q: string;
+  onUpload: () => void;
+  onFolder: () => void;
+  onLink: () => void;
+  onClear: () => void;
+}) {
   const t = useT();
-  if (q) return <div className="py-16 text-center text-[14px] text-fg-3">{t('backlog.noMatches')}</div>;
+  const ru = useLang() === 'ru';
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col items-center rounded-2xl border-2 border-dashed border-line-strong px-6 py-14 text-center"
+    <StatePanel
+      illustration={q ? 'lost' : 'workspace'}
+      title={q ? t('backlog.noMatches') : ru ? 'Всё нужное — под рукой' : 'Everything in its place'}
+      action={
+        q ? (
+          <button className="state-link" onClick={onClear}>
+            {ru ? 'Сбросить поиск' : 'Clear search'}
+          </button>
+        ) : (
+          <>
+            <button onClick={onUpload} className="state-primary">
+              <Upload size={15} />
+              {t('common.upload')}
+            </button>
+            <button onClick={onLink} className="state-link">
+              <Link2 size={15} />
+              {t('files.addLink')}
+            </button>
+            <button onClick={onFolder} className="state-link">
+              <FolderPlus size={15} />
+              {t('files.newFolder')}
+            </button>
+          </>
+        )
+      }
+      footer={!q ? t('files.pasteHint', { key: `${modKey()}+V` }) : undefined}
     >
-      <FolderGlyph size={52} color="gray" />
-      <div className="mt-4 text-[16px] font-semibold">{t('files.emptyTitle')}</div>
-      <div className="mt-1 max-w-[460px] text-[14px] text-fg-3">{t('files.empty')}</div>
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        <button
-          onClick={onUpload}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-[14px] font-medium text-white hover:bg-accent-hover"
-        >
-          <Upload size={15} /> {t('common.upload')}
-        </button>
-        <button onClick={onLink} className="flex h-8 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[14px] hover:bg-hover">
-          <Link2 size={15} /> {t('files.addLink')}
-        </button>
-        <button onClick={onFolder} className="flex h-8 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[14px] hover:bg-hover">
-          <FolderPlus size={15} /> {t('files.newFolder')}
-        </button>
-      </div>
-      <div className="mt-4 text-[12.5px] text-fg-4">{t('files.pasteHint', { key: `${modKey()}+V` })}</div>
-    </motion.div>
+      {q
+        ? ru
+          ? 'Попробуйте другое название или сбросьте поиск, чтобы увидеть все файлы.'
+          : 'Try another name or clear search to see all files.'
+        : t('files.empty')}
+    </StatePanel>
   );
 }
 

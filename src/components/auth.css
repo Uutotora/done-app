@@ -544,3 +544,98 @@
     padding-bottom: 16px;
   }
 }
+
+/* Illustrated account states share the same ink artwork as the workspace. */
+.auth-shell-illustrated .auth-glow {
+  display: none;
+}
+.auth-state-art {
+  width: min(260px, 100%);
+  margin: 0 0 26px;
+}
+.auth-state-art .state-illustration {
+  width: 100%;
+}
+.auth-state-card {
+  text-align: center;
+  max-width: 420px;
+}
+.auth-state-card .auth-description {
+  margin-bottom: 22px;
+}
+.auth-state-card .auth-submit {
+  max-width: 320px;
+}
+.auth-state-card.auth-checking h1 {
+  font-size: 24px;
+}
+.auth-recovery-card {
+  max-width: 380px;
+}
+.auth-story-copy {
+  display: none;
+}
+.auth-join-card .auth-invite-badge {
+  margin-bottom: 16px;
+}
+.auth-join-card .auth-identity {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.auth-join-card .auth-identity > span:first-of-type {
+  min-width: 0;
+}
+@media (min-width: 900px) {
+  .auth-stage-invitation {
+    flex-direction: row;
+    gap: clamp(60px, 8vw, 120px);
+    padding: 100px 48px 60px;
+  }
+  .auth-invitation-story {
+    width: 360px;
+    margin: 0;
+    text-align: center;
+  }
+  .auth-story-copy {
+    display: block;
+    margin-top: 34px;
+  }
+  .auth-story-copy h2 {
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+  .auth-story-copy > p:last-child {
+    max-width: 300px;
+    margin: 16px auto 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+  .auth-join-card {
+    max-width: 390px;
+  }
+}
+@media (max-width: 899px) {
+  .auth-stage-invitation .auth-state-art {
+    width: 210px;
+    margin-bottom: 20px;
+  }
+}
+@media (max-width: 540px) {
+  .auth-shell-illustrated .auth-stage {
+    padding-top: 90px;
+  }
+  .auth-state-art {
+    width: 210px;
+    margin-bottom: 20px;
+  }
+  .auth-stage-invitation .auth-state-art {
+    width: 175px;
+  }
+  .auth-shell-illustrated .auth-card h1 {
+    font-size: 27px;
+  }
+}

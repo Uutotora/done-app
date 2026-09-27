@@ -62,9 +62,8 @@ test('welcome fits a laptop and a phone, respects reduced motion, and keeps one 
   await page.goto('/?invite=expired-test-link&email=wrong@example.test');
   await expect(page.getByRole('heading', { name: 'Эта ссылка уже не действует' })).toBeVisible();
   await expect(page.getByLabel('Придумайте пароль')).toHaveCount(0);
-  await expect(page.locator('.auth-stationery-notebook')).toBeVisible();
-  await expect(page.locator('.auth-stationery-notebook')).toHaveCSS('animation-name', 'none');
-  const decorationBounds = await page.locator('.auth-stationery').boundingBox();
+  await expect(page.locator('.auth-state-art .state-illustration')).toBeVisible();
+  const decorationBounds = await page.locator('.auth-state-art').boundingBox();
   const formBounds = await page.locator('.auth-card').boundingBox();
   expect(decorationBounds!.y + decorationBounds!.height).toBeLessThanOrEqual(formBounds!.y);
   await page.screenshot({ path: testInfo.outputPath('expired-invitation-mobile.png'), animations: 'disabled' });

@@ -1,3 +1,4 @@
+import { StatePanel } from '@/components/StatePanel';
 import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ArrowUpRight, MoreHorizontal, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -80,11 +81,9 @@ export function ProjectArchiveDialog() {
       )}
       <div className="max-h-[min(420px,60vh)] min-h-[120px] overflow-y-auto p-1.5">
         {all.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-10 text-center">
-            <Archive size={28} strokeWidth={1.5} className="mb-1 text-fg-4" />
-            <div className="text-[14px] font-medium text-fg-2">{t('archive.empty')}</div>
-            <div className="max-w-[340px] text-[13px] text-fg-3">{t('archive.emptyHint')}</div>
-          </div>
+          <StatePanel compact illustration="workspace" title={t('archive.empty')}>
+            {t('archive.emptyHint')}
+          </StatePanel>
         ) : list.length === 0 ? (
           <div className="flex h-[120px] items-center justify-center text-[13.5px] text-fg-3">{t('cmd.noResults')}</div>
         ) : (

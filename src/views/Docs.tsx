@@ -1,3 +1,4 @@
+import { StatePanel } from '@/components/StatePanel';
 import { motion } from 'motion/react';
 import { FileText, LayoutGrid, List, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -90,9 +91,21 @@ export function DocsView() {
           </div>
 
           {docs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-line-strong py-12 text-center text-[14px] text-fg-3">
-              {q ? t('backlog.noMatches') : t('docs.empty')}
-            </div>
+            <StatePanel
+              illustration={q ? 'lost' : 'workspace'}
+              title={q ? t('backlog.noMatches') : lang === 'ru' ? 'Место для ваших идей' : 'A place for your ideas'}
+              action={
+                <button className={q ? 'state-link' : 'state-primary'} onClick={() => (q ? setQ('') : create())}>
+                  {q ? (lang === 'ru' ? 'Сбросить поиск' : 'Clear search') : t('docs.new')}
+                </button>
+              }
+            >
+              {q
+                ? lang === 'ru'
+                  ? 'Попробуйте другое название или сбросьте поиск, чтобы увидеть все документы.'
+                  : 'Try another title or clear search to see all documents.'
+                : t('docs.empty')}
+            </StatePanel>
           ) : view.mode === 'gallery' ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
               {docs.map((d, i) => (

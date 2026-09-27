@@ -3,6 +3,8 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 // @ts-expect-error shared Node server
 import { createAuthApi } from '../server/auth.mjs';
+// @ts-expect-error shared Node server
+import { applyChanges } from '../server/access.mjs';
 import { createEmptyData, useData } from '@/lib/store';
 import { itemFromTemplate, sanitizeTemplate, templatesFor } from '@/lib/templates';
 import type { ItemTemplate } from '@/lib/types';
@@ -137,6 +139,21 @@ describe('task templates in the store', () => {
     expect(itemFromTemplate(tpl, { gone: { id: 'gone', name: 'Gone', color: 'gray', removed: true } }).assigneeId).toBeUndefined();
     expect(itemFromTemplate(tpl, { gone: { id: 'gone', name: 'Here', color: 'gray' } }).assigneeId).toBe('gone');
     expect(sanitizeTemplate({ recurrence: { freq: 'nope', interval: 1 } } as unknown as ItemTemplate).recurrence).toBeUndefined();
+  });
+});
+
+describe('pruning orphaned templates', () => {
+  it('reports the delta for a template dropped together with its deleted project, like a task', () => {
+    const owner = { id: 'own', role: 'owner', projectIds: null };
+    const at = '2026-09-01T00:00:00.000Z';
+    const current = createEmptyData('en') as unknown as Record<string, Record<string, unknown>>;
+    current.projects = { alpha: { id: 'alpha', name: 'Alpha', createdAt: at, updatedAt: at } };
+    current.templates = { t1: { id: 't1', projectId: 'alpha', name: 'T', type: 'task', priority: 'none', tags: [], createdAt: at, updatedAt: at } };
+    const info: { changed?: { records?: Record<string, string[]> } } = {};
+    const next = applyChanges(current, { records: { projects: { alpha: { before: current.projects.alpha, after: null } } } }, owner, info);
+    expect((next as { templates: Record<string, unknown> }).templates.t1).toBeUndefined();
+    // Without this delta entry, other tabs never learn the template is gone until a full reload.
+    expect(info.changed?.records?.templates).toEqual(['t1']);
   });
 });
 

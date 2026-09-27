@@ -539,7 +539,10 @@ function pruneOrphans(state, touch = () => {}) {
     touch('maps', id);
   }
   for (const [id, tpl] of Object.entries(state.templates)) {
-    if (tpl.projectId !== undefined && !Object.hasOwn(state.projects, tpl.projectId)) delete state.templates[id];
+    if (tpl.projectId !== undefined && !Object.hasOwn(state.projects, tpl.projectId)) {
+      delete state.templates[id];
+      touch('templates', id);
+    }
   }
   for (const [id, item] of Object.entries(state.items)) {
     if (item.parentId && !state.items[item.parentId]) state.items[id] = { ...item, parentId: undefined };

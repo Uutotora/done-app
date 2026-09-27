@@ -29,6 +29,7 @@ import {
   validBlobId,
 } from './blobs.mjs';
 import { contentEvents, isContentAction } from './contentAudit.mjs';
+import { createMail, inviteEmail, resetEmail, testEmail } from './mail.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -63,6 +64,29 @@ const DEFAULT_MAX_UPLOAD_MB = 100;
 /** Images and files inserted into pages, tasks and project briefs. */
 const EDITOR_UPLOAD_MB = 20;
 const CLEANUP_EVERY = 6 * 3600000;
+const HOUR = 3600000;
+/** Counts requests per key in a fixed window; the map stays bounded under a flood of keys. */
+function createLimiter(max, windowMs, cap = 10000) {
+  const hits = new Map();
+  return (key) => {
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || entry.reset <= now) {
+      hits.delete(key);
+      entry = { count: 0, reset: now + windowMs };
+      hits.set(key, entry);
+    }
+    entry.count++;
+    if (hits.size > cap) {
+      for (const [k, v] of hits) if (v.reset <= now) hits.delete(k);
+      for (const k of hits.keys()) {
+        if (hits.size <= cap) break;
+        hits.delete(k);
+      }
+    }
+    return entry.count <= max;
+  };
+}
 
 export function createAuthApi({
   filename = process.env.DONE_DB_PATH || resolve('.data/done.sqlite'),
@@ -70,6 +94,10 @@ export function createAuthApi({
   // Uploaded files live next to the database unless DONE_FILES_DIR says otherwise; an in-memory database gets a temporary directory.
   filesDir = filename === ':memory:' ? undefined : resolve(process.env.DONE_FILES_DIR || resolve(dirname(filename), 'files')),
   maxUploadMb = Number(process.env.DONE_MAX_UPLOAD_MB) > 0 ? Number(process.env.DONE_MAX_UPLOAD_MB) : DEFAULT_MAX_UPLOAD_MB,
+  // Email: a transport with sendMail (tests), the public URL for links and the sender; default to the environment.
+  mailer,
+  publicUrl,
+  mailFrom,
 } = {}) {
   if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
@@ -78,7 +106,8 @@ export function createAuthApi({
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, project_ids TEXT, expires INTEGER NOT NULL, created_by TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, revision INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, created_at INTEGER NOT NULL);`);
   // Columns added after the first release; older databases are upgraded in place.
   const addColumn = (table, name, definition) => {
     if (
@@ -119,6 +148,21 @@ export function createAuthApi({
   }
   db.exec('CREATE INDEX IF NOT EXISTS audit_kind ON audit(kind, id)');
   const attempts = new Map();
+  const mail = createMail({ transport: mailer, publicUrl, from: mailFrom });
+  // Password reset: requests per IP and per address, and uses of reset links per IP.
+  const resetRequestsByIp = createLimiter(20, 15 * 60000);
+  const resetRequestsByEmail = createLimiter(5, 15 * 60000);
+  const resetLinksByIp = createLimiter(30, 15 * 60000);
+  const mailTests = createLimiter(5, 15 * 60000);
+  const background = new Set();
+  /** Work that must not delay the response or change its timing, such as sending a reset email. */
+  const later = (task) => {
+    const run = new Promise((resolve) => setImmediate(resolve))
+      .then(task)
+      .catch((error) => console.error('Done background task failed:', error?.message ?? error))
+      .finally(() => background.delete(run));
+    background.add(run);
+  };
   const audit = (user, action, detail = '') =>
     db
       .prepare('INSERT INTO audit(actor,action,detail,at,kind) VALUES(?,?,?,?,?)')
@@ -391,6 +435,27 @@ export function createAuthApi({
   const canManage = (actor, target) =>
     target.id !== actor.id && (actor.role === 'owner' || (actor.role === 'admin' && ['editor', 'viewer'].includes(target.role)));
   const activeOwners = () => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role='owner' AND disabled=0").get().n;
+  const langOf = (input) => (input?.lang === 'en' ? 'en' : 'ru');
+  /** The name people see in the workspace (it can change after registration). */
+  const displayName = (row) => readWorkspace()?.data.people?.[row.id]?.name || row.name;
+  const inviteLink = (token, email) => mail.link(`invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`);
+  /** A one-time link to set a new password. Only its hash is stored, and older links of the person stop working. */
+  const createResetToken = (userId, lifetime) => {
+    const token = randomBytes(32).toString('base64url');
+    const now = Date.now();
+    db.prepare('DELETE FROM password_resets WHERE user_id=? OR expires<?').run(userId, now);
+    db.prepare('INSERT INTO password_resets(token_hash,user_id,expires,created_at) VALUES(?,?,?,?)').run(hash(token), userId, now + lifetime, now);
+    return { token, expires: now + lifetime, url: mail.link(`reset=${token}`) };
+  };
+  /** The active account a reset link belongs to, or undefined when the link is unknown, used or expired. */
+  const findReset = (token) =>
+    typeof token === 'string' && token.length > 0 && token.length <= 128
+      ? db
+          .prepare(
+            'SELECT users.* FROM password_resets JOIN users ON users.id=password_resets.user_id WHERE password_resets.token_hash=? AND password_resets.expires>? AND users.disabled=0',
+          )
+          .get(hash(token), Date.now())
+      : undefined;
   /** Tells a member's open tabs to reload their access right away. */
   const notifyAccess = (userId) => {
     const fresh = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(userId));
@@ -432,7 +497,7 @@ export function createAuthApi({
       }
       let user = authenticate(req);
       if (path === '/api/auth/session' && req.method === 'GET')
-        return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get() });
+        return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get(), mail: mail.configured });
       if (['/api/auth/register', '/api/auth/login'].includes(path) && req.method === 'POST') {
         const input = await body(req);
         const email = String(input.email ?? '')
@@ -508,6 +573,66 @@ export function createAuthApi({
         startSession(user, res);
         return send(res, 200, { user });
       }
+      if (path === '/api/auth/reset/request' && req.method === 'POST') {
+        // Always the same answer, right away, so nobody can find out which addresses have accounts.
+        const input = await body(req, 4096);
+        if (!resetRequestsByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const email = String(input.email ?? '')
+          .trim()
+          .toLowerCase();
+        if (!EMAIL.test(email) || email.length > 254) fail(400, 'Enter a valid email');
+        const lang = langOf(input);
+        // Past the limit for an address nothing more is sent, but the answer stays the same.
+        if (resetRequestsByEmail(email) && mail.configured)
+          later(async () => {
+            const row = db.prepare('SELECT * FROM users WHERE email=? AND disabled=0').get(email);
+            if (!row) return;
+            const { url } = createResetToken(row.id, HOUR);
+            audit(row.id, 'password.reset.requested', email);
+            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1 }) });
+          });
+        return send(res, 200, { ok: true });
+      }
+      if (path === '/api/auth/reset/check' && req.method === 'POST') {
+        const input = await body(req, 4096);
+        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const row = findReset(input.token);
+        if (!row) fail(410, 'This link is invalid or has expired');
+        return send(res, 200, { email: row.email, name: displayName(row) });
+      }
+      if (path === '/api/auth/reset' && req.method === 'POST') {
+        const input = await body(req, 4096);
+        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const password = typeof input.password === 'string' ? input.password : '';
+        if (password.length < 12 || password.length > 256) fail(400, 'Use 12–256 characters for the password');
+        const row = findReset(input.token);
+        if (!row) fail(410, 'This link is invalid or has expired');
+        const salt = randomBytes(16).toString('hex');
+        const encoded = `${salt}:${(await derive(password, salt, 64)).toString('hex')}`;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          // The link is used up here, so a second request with it at the same time finds nothing.
+          const used = db.prepare('DELETE FROM password_resets WHERE token_hash=? AND expires>?').run(hash(input.token), Date.now());
+          const active = db.prepare('SELECT id FROM users WHERE id=? AND disabled=0').get(row.id);
+          if (!used.changes || !active) fail(410, 'This link is invalid or has expired');
+          db.prepare('UPDATE users SET password=? WHERE id=?').run(encoded, row.id);
+          // Everyone signed in with the old password is signed out, and other reset links stop working.
+          db.prepare('DELETE FROM sessions WHERE user_id=?').run(row.id);
+          db.prepare('DELETE FROM password_resets WHERE user_id=?').run(row.id);
+          db.exec('COMMIT');
+        } catch (e) {
+          db.exec('ROLLBACK');
+          throw e;
+        }
+        closeStreams(row.id);
+        // This browser may still hold another session; the new one replaces it.
+        const previous = sessionToken(req);
+        if (previous) db.prepare('DELETE FROM sessions WHERE token=?').run(hash(previous));
+        audit(row.id, 'password.reset');
+        user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(row.id));
+        startSession(user, res);
+        return send(res, 200, { user });
+      }
       if (!user) fail(401, 'Sign in to continue');
       if (path === '/api/auth/logout' && req.method === 'POST') {
         db.prepare('DELETE FROM sessions WHERE token=?').run(hash(sessionToken(req) || ''));
@@ -532,6 +657,7 @@ export function createAuthApi({
           user.id,
         );
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+        db.prepare('DELETE FROM password_resets WHERE user_id=?').run(user.id);
         startSession(user, res);
         audit(user.id, 'password.changed');
         return send(res, 200, { ok: true });
@@ -763,6 +889,7 @@ export function createAuthApi({
         if (!isAdmin(user)) fail(403, 'Administrator access required');
         if (path === '/api/admin/members' && req.method === 'GET')
           return send(res, 200, {
+            mail: { configured: mail.configured, ...(mail.configured ? { from: mail.from } : {}) },
             members: db.prepare('SELECT * FROM users ORDER BY created_at').all().map(publicUser),
             invites: db
               .prepare(
@@ -812,6 +939,7 @@ export function createAuthApi({
           const canCreate = role === 'viewer' ? 0 : Number(input.canCreateProjects !== false);
           const invites = [];
           const skipped = [];
+          const expires = Date.now() + 7 * 86400000;
           for (const email of emails) {
             if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
               skipped.push({ email, reason: 'exists' });
@@ -821,12 +949,88 @@ export function createAuthApi({
             db.prepare('DELETE FROM invites WHERE email=?').run(email);
             db.prepare(
               'INSERT INTO invites(token,email,role,project_ids,project_roles,can_create_projects,expires,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-            ).run(hash(token), email, role, projectIds, projectRoles, canCreate, Date.now() + 7 * 86400000, user.id, Date.now());
+            ).run(hash(token), email, role, projectIds, projectRoles, canCreate, expires, user.id, Date.now());
             audit(user.id, 'invite.created', `${email} · ${role}`);
-            invites.push({ email, token });
+            invites.push({ email, token, url: inviteLink(token, email) });
           }
           if (!invites.length && skipped.length) fail(409, 'Account already exists');
-          return send(res, 201, { invites, skipped, ...(invites.length === 1 ? invites[0] : {}) });
+          // With email set up every address gets a letter; the links stay in the answer as a fallback.
+          let delivery = { sent: [], failed: [] };
+          if (mail.configured && invites.length) {
+            const lang = langOf(input);
+            const workspace = readWorkspace()?.data.workspace?.name;
+            const inviter = displayName(user);
+            delivery = await mail.sendAll(
+              invites.map((i) => ({ to: i.email, ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires }) })),
+            );
+          }
+          return send(res, 201, {
+            invites,
+            skipped,
+            emailed: delivery.sent,
+            failed: delivery.failed,
+            ...(invites.length === 1 ? invites[0] : {}),
+          });
+        }
+        if (path === '/api/admin/invites/resend' && req.method === 'POST') {
+          // A new link for a pending invitation (the old one stops working), emailed when email is set up.
+          const input = await authenticatedBody(req, 4096);
+          const email = String(input.email ?? '')
+            .trim()
+            .toLowerCase();
+          const invite = db.prepare('SELECT * FROM invites WHERE email=?').get(email);
+          if (!invite) fail(404, 'Invitation not found');
+          const role = normalizeRole(invite.role);
+          if (!canAssignRole(user, role)) fail(403, 'Cannot change this invitation');
+          if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
+            db.prepare('DELETE FROM invites WHERE email=?').run(email);
+            fail(409, 'Account already exists');
+          }
+          const token = randomBytes(32).toString('base64url');
+          const expires = Date.now() + 7 * 86400000;
+          db.prepare('UPDATE invites SET token=?,expires=?,created_at=?,created_by=? WHERE email=?').run(
+            hash(token),
+            expires,
+            Date.now(),
+            user.id,
+            email,
+          );
+          audit(user.id, 'invite.renewed', `${email} · ${role}`);
+          const url = inviteLink(token, email);
+          const workspace = readWorkspace()?.data.workspace?.name;
+          const emailed =
+            mail.configured &&
+            (await mail.send({
+              to: email,
+              ...inviteEmail({ lang: langOf(input), workspace, inviter: displayName(user), role, link: url, expires }),
+            }));
+          return send(res, 200, { email, token, url, expires, emailed });
+        }
+        if (/^\/api\/admin\/members\/[^/]+\/reset$/.test(path) && req.method === 'POST') {
+          // A reset link made by an administrator: emailed when possible and always returned to copy.
+          // Current sessions stay until the password is actually changed.
+          const target = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(decodeURIComponent(path.split('/')[4])));
+          if (!target) fail(404, 'Member not found');
+          if (!canManage(user, target)) fail(403, 'Cannot change this account');
+          if (target.disabled) fail(400, 'Restore access before resetting the password');
+          const input = await authenticatedBody(req, 4096);
+          const { token, url, expires } = createResetToken(target.id, 24 * HOUR);
+          audit(user.id, 'password.reset.link', target.email);
+          const emailed =
+            mail.configured &&
+            (await mail.send({
+              to: target.email,
+              ...resetEmail({ lang: langOf(input), name: displayName(target), email: target.email, link: url, hours: 24, admin: displayName(user) }),
+            }));
+          return send(res, 200, { token, url, expires, emailed });
+        }
+        if (path === '/api/admin/mail/test' && req.method === 'POST') {
+          const input = await authenticatedBody(req, 4096);
+          if (!mail.configured) fail(400, 'Email is not set up on the server');
+          if (!mailTests(user.id)) fail(429, 'Too many test emails. Try again in 15 minutes.');
+          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/` }) });
+          if (!ok) fail(502, 'Could not send the email. Check the SMTP settings and the server log.');
+          return send(res, 200, { ok: true, to: user.email });
         }
         if (path === '/api/admin/invites' && req.method === 'DELETE') {
           const input = await authenticatedBody(req);
@@ -885,8 +1089,9 @@ export function createAuthApi({
             id,
           );
           if (disabled) {
-            // Suspension signs the member out everywhere at once.
+            // Suspension signs the member out everywhere at once and cancels their reset links.
             db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+            db.prepare('DELETE FROM password_resets WHERE user_id=?').run(id);
             closeStreams(id);
           } else notifyAccess(id);
           audit(
@@ -910,10 +1115,13 @@ export function createAuthApi({
     /** Runs the unused-file cleanup now (it also runs shortly after start and every 6 hours). */
     collectGarbage: (now) => blobs.collectGarbage(now),
     filesDir: blobs.dir,
+    /** Resolves when background work started by requests (such as reset emails) is done. */
+    idle: () => Promise.allSettled([...background]),
     close: () => {
       clearInterval(heartbeat);
       clearTimeout(firstCleanup);
       clearInterval(cleanupTimer);
+      mail.close();
       for (const stream of streams) stream.res.end();
       streams.clear();
       db.close();

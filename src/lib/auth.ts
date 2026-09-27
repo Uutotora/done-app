@@ -32,11 +32,13 @@ interface AuthState {
   mode: 'loading' | 'signedOut' | 'local' | 'signedIn';
   user: AuthUser | null;
   setup: boolean;
+  /** The server sends email (invitations, password reset links). */
+  mail: boolean;
   error: string;
   sync: SyncStatus;
   syncError: string;
 }
-export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, error: '', sync: 'saved', syncError: '' }));
+export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, mail: false, error: '', sync: 'saved', syncError: '' }));
 export const isAdmin = (user: AuthUser | null) => !!user && ['owner', 'admin'].includes(user.role);
 
 const LEVELS: AccessLevel[] = ['viewer', 'commenter', 'editor', 'full'];
@@ -326,10 +328,13 @@ export async function enterAccount(user: AuthUser) {
 }
 export async function bootstrapAuth() {
   try {
-    const result = await api<{ user: AuthUser | null; setup: boolean }>('/api/auth/session');
-    useAuth.setState({ setup: result.setup });
-    if (result.user) await enterAccount(result.user);
-    else if (sessionStorage.getItem('done:mode') === 'local' && !new URLSearchParams(location.search).has('invite')) await enterLocal();
+    const result = await api<{ user: AuthUser | null; setup: boolean; mail?: boolean }>('/api/auth/session');
+    useAuth.setState({ setup: result.setup, mail: !!result.mail });
+    const params = new URLSearchParams(location.search);
+    // A reset link comes first, even in a browser that is signed in or was in the demo.
+    if (params.has('reset')) useAuth.setState({ mode: 'signedOut' });
+    else if (result.user) await enterAccount(result.user);
+    else if (sessionStorage.getItem('done:mode') === 'local' && !params.has('invite')) await enterLocal();
     else useAuth.setState({ mode: 'signedOut' });
   } catch (e) {
     useAuth.setState({ mode: 'signedOut', error: (e as Error).message });

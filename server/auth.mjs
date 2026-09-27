@@ -29,7 +29,7 @@ import {
   validBlobId,
 } from './blobs.mjs';
 import { contentEvents, isContentAction } from './contentAudit.mjs';
-import { createMail, inviteEmail, resetEmail, testEmail } from './mail.mjs';
+import { createMail, inviteEmail, normalizeMailSettings, resetEmail, testEmail } from './mail.mjs';
 import { randomAnimalAvatar } from '../shared/avatars.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -99,6 +99,8 @@ export function createAuthApi({
   mailer,
   publicUrl,
   mailFrom,
+  // Builds SMTP transports for settings saved in the app (tests pass a stub).
+  smtpFactory,
 } = {}) {
   if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
@@ -108,7 +110,24 @@ export function createAuthApi({
     CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, project_ids TEXT, expires INTEGER NOT NULL, created_by TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, revision INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, created_at INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS password_resets (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS join_links (scope TEXT PRIMARY KEY, token TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, level TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, joined INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL, created_at INTEGER NOT NULL);`);
+  // An early build kept a single team link in its own table.
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='invite_link'").get()) {
+    for (const row of db.prepare('SELECT * FROM invite_link').all())
+      db.prepare('INSERT OR IGNORE INTO join_links(scope,token,token_hash,level,enabled,joined,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)').run(
+        '',
+        row.token,
+        createHash('sha256').update(row.token).digest('hex'),
+        row.role,
+        row.enabled,
+        row.joined,
+        row.created_by,
+        row.created_at,
+      );
+    db.exec('DROP TABLE invite_link');
+  }
   // Columns added after the first release; older databases are upgraded in place.
   const addColumn = (table, name, definition) => {
     if (
@@ -149,7 +168,24 @@ export function createAuthApi({
   }
   db.exec('CREATE INDEX IF NOT EXISTS audit_kind ON audit(kind, id)');
   const attempts = new Map();
-  const mail = createMail({ transport: mailer, publicUrl, from: mailFrom });
+  // Email settings saved in Settings > Email; the environment still wins when it sets SMTP.
+  const readSavedMail = () => parse(db.prepare("SELECT value FROM app_settings WHERE key='mail'").get()?.value, null);
+  const mail = createMail({
+    transport: mailer,
+    publicUrl,
+    from: mailFrom,
+    saved: readSavedMail(),
+    ...(smtpFactory ? { createTransport: smtpFactory } : {}),
+  });
+  const mailChecks = createLimiter(10, 15 * 60000);
+  /** What administrators see about email: where it is set up and with what, never the password. */
+  const mailStatus = (user) => ({
+    configured: mail.configured,
+    ...(mail.configured ? { from: mail.from } : {}),
+    source: mail.source,
+    editable: !mail.fromEnv && user.role === 'owner',
+    settings: mail.details,
+  });
   // Password reset: requests per IP and per address, and uses of reset links per IP.
   const resetRequestsByIp = createLimiter(20, 15 * 60000);
   const resetRequestsByEmail = createLimiter(5, 15 * 60000);
@@ -441,6 +477,114 @@ export function createAuthApi({
   /** The name people see in the workspace (it can change after registration). */
   const displayName = (row) => readWorkspace()?.data.people?.[row.id]?.name || row.name;
   const inviteLink = (token, email) => mail.link(`invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`);
+  /**
+   * Shareable invite links, like Notion's and Figma's. Anyone who has one can create an account and lands
+   * right where the link leads: the team link ("" scope) gives editors or viewers every project; a project
+   * link gives that one project at its level. Signed-in people who open a project link get the project added.
+   * Administrators turn links off or reset them, which stops the old one. The token is kept so the link can
+   * be copied again later; lookups use its hash.
+   */
+  const TEAM_LEVELS = ['editor', 'viewer'];
+  const PROJECT_LEVELS = ['editor', 'commenter', 'viewer'];
+  const readJoinLink = (scope = '') => db.prepare('SELECT * FROM join_links WHERE scope=?').get(scope);
+  const joinUrl = (token) => mail.link(`join=${encodeURIComponent(token)}`);
+  const publicJoinLink = (row) =>
+    row
+      ? { enabled: !!row.enabled, token: row.token, url: joinUrl(row.token), level: row.level, joined: row.joined, createdAt: row.created_at }
+      : { enabled: false, token: null, url: null, level: 'editor', joined: 0, createdAt: null };
+  /** The link a token opens; undefined when it is unknown, off, or its project is gone. */
+  const findJoinLink = (token) => {
+    if (typeof token !== 'string' || !token || token.length > 128) return undefined;
+    const row = db.prepare('SELECT * FROM join_links WHERE token_hash=? AND enabled=1').get(hash(token));
+    if (!row) return undefined;
+    if (row.scope && !readWorkspace()?.data.projects?.[row.scope]) return undefined;
+    return row;
+  };
+  /** The account a link creates: role, projects and levels. */
+  const linkAccess = (row) => {
+    if (!row.scope) {
+      const role = TEAM_LEVELS.includes(row.level) ? row.level : 'viewer';
+      return { role, projectIds: null, projectRoles: {}, canCreate: role !== 'viewer' };
+    }
+    const level = PROJECT_LEVELS.includes(row.level) ? row.level : 'viewer';
+    // Commenting is a project level of a viewer; editors of one project do not start new ones.
+    return {
+      role: level === 'editor' ? 'editor' : 'viewer',
+      projectIds: [row.scope],
+      projectRoles: level === 'commenter' ? { [row.scope]: 'commenter' } : {},
+      canCreate: false,
+    };
+  };
+  /** Creates, changes or resets a link; returns the stored row. */
+  const saveJoinLink = (scope, { level, enabled, reset }, user) => {
+    const row = readJoinLink(scope);
+    const nextLevel = level ?? row?.level ?? 'editor';
+    const nextEnabled = enabled === undefined ? (row ? !!row.enabled : true) : !!enabled;
+    // The log names the project; the team link is written as "team" and shown in the reader's language.
+    const target = scope ? readWorkspace()?.data.projects?.[scope]?.name || scope : 'team';
+    if (!row || reset) {
+      const token = randomBytes(24).toString('base64url');
+      db.prepare(
+        'INSERT INTO join_links(scope,token,token_hash,level,enabled,joined,created_by,created_at) VALUES(?,?,?,?,?,0,?,?) ON CONFLICT(scope) DO UPDATE SET token=excluded.token,token_hash=excluded.token_hash,level=excluded.level,enabled=excluded.enabled,joined=0,created_by=excluded.created_by,created_at=excluded.created_at',
+      ).run(scope, token, hash(token), nextLevel, Number(nextEnabled), user.id, Date.now());
+      audit(user.id, row ? 'invite.link.reset' : 'invite.link.enabled', `${target} · ${nextLevel}`);
+    } else {
+      db.prepare('UPDATE join_links SET level=?,enabled=? WHERE scope=?').run(nextLevel, Number(nextEnabled), scope);
+      if (nextEnabled !== !!row.enabled) audit(user.id, nextEnabled ? 'invite.link.enabled' : 'invite.link.disabled', `${target} · ${nextLevel}`);
+      else if (nextLevel !== row.level) audit(user.id, 'invite.link.role', `${target} · ${nextLevel}`);
+    }
+    return readJoinLink(scope);
+  };
+  /**
+   * What a link opens: the team name, who shared it, the level, and for a project link the project's
+   * name and icon (that is what the person is invited to). Nothing about other projects or accounts.
+   */
+  const joinPreview = (row) => {
+    const data = readWorkspace()?.data;
+    const inviter = row.created_by ? db.prepare('SELECT * FROM users WHERE id=?').get(row.created_by) : undefined;
+    const person = inviter ? data?.people?.[inviter.id] : undefined;
+    const project = row.scope ? data?.projects?.[row.scope] : undefined;
+    return {
+      workspace: data?.workspace?.name ?? '',
+      inviter: inviter ? displayName(inviter) : '',
+      inviterAvatar: person?.avatar ?? '',
+      inviterPhoto: person?.photo ?? '',
+      inviterColor: person?.color ?? '',
+      role: linkAccess(row).role,
+      level: row.level,
+      ...(project ? { project: { id: project.id, name: project.name, icon: project.icon } } : {}),
+    };
+  };
+  /**
+   * A signed-in member opened a project link: the project is added at the link's level, never lowering
+   * access they already have. Returns where to go.
+   */
+  const acceptJoinLink = (user, row) => {
+    if (!row.scope || isAdmin(user) || user.projectIds === null || canReadProject(user, row.scope))
+      return { projectId: row.scope || null, added: false };
+    const level = row.level === 'editor' && user.role === 'viewer' ? 'commenter' : row.level;
+    const roles = { ...user.projectRoles };
+    if (level !== (user.role === 'viewer' ? 'viewer' : 'editor')) roles[row.scope] = level;
+    db.prepare('UPDATE users SET project_ids=?,project_roles=? WHERE id=?').run(
+      JSON.stringify([...user.projectIds, row.scope]),
+      JSON.stringify(roles),
+      user.id,
+    );
+    db.prepare('UPDATE join_links SET joined=joined+1 WHERE scope=?').run(row.scope);
+    audit(user.id, 'project.joined', `${readWorkspace()?.data.projects?.[row.scope]?.name ?? row.scope} · ${level}`);
+    notifyAccess(user.id);
+    return { projectId: row.scope, added: true };
+  };
+  /** The projects an invitation opens, for the letter: null means every project. */
+  const invitedProjects = (projectIds) => {
+    const ids = typeof projectIds === 'string' ? parse(projectIds, []) : projectIds;
+    if (ids === null || ids === undefined) return null;
+    const projects = readWorkspace()?.data.projects ?? {};
+    return ids
+      .map((id) => projects[id])
+      .filter(Boolean)
+      .map((p) => ({ name: p.name, icon: p.icon }));
+  };
   /** A one-time link to set a new password. Only its hash is stored, and older links of the person stop working. */
   const createResetToken = (userId, lifetime) => {
     const token = randomBytes(32).toString('base64url');
@@ -512,13 +656,26 @@ export function createAuthApi({
           .get(hash(input.token), Date.now());
         if (!invitation || db.prepare('SELECT id FROM users WHERE email=?').get(invitation.email))
           fail(410, 'This invitation is invalid or has expired');
+        const data = readWorkspace()?.data;
+        const person = data?.people?.[invitation.created_by];
         return send(res, 200, {
           email: invitation.email,
-          workspace: readWorkspace()?.data.workspace?.name || 'Done',
-          inviter: invitation.inviter,
+          workspace: data?.workspace?.name ?? '',
+          inviter: person?.name || invitation.inviter || '',
+          inviterAvatar: person?.avatar ?? '',
+          inviterPhoto: person?.photo ?? '',
+          inviterColor: person?.color ?? '',
           role: normalizeRole(invitation.role),
           expires: invitation.expires,
         });
+      }
+      // The team's shareable link: what it opens, without any account or project details.
+      if (path === '/api/auth/join' && req.method === 'POST') {
+        if (!invitationLookups(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const input = await body(req, 4096);
+        const row = findJoinLink(input.token);
+        if (!row) fail(410, 'This invite link is invalid or has been turned off');
+        return send(res, 200, joinPreview(row));
       }
       if (['/api/auth/register', '/api/auth/login'].includes(path) && req.method === 'POST') {
         const input = await body(req);
@@ -555,8 +712,10 @@ export function createAuthApi({
           const invite = input.invite
             ? db.prepare('SELECT * FROM invites WHERE token=? AND email=? AND expires>?').get(hash(String(input.invite)), email, Date.now())
             : null;
-          if (!setup && !invite) fail(403, 'An invitation is required');
+          const joinLink = !setup && !invite && input.join ? findJoinLink(String(input.join)) : undefined;
+          if (!setup && !invite && !joinLink) fail(403, 'An invitation is required');
           if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) fail(409, 'Account already exists');
+          const linked = joinLink ? linkAccess(joinLink) : null;
           const id = randomUUID();
           const current = setup ? null : readWorkspace();
           // A copy, so the live update can tell teammates what changed.
@@ -566,6 +725,8 @@ export function createAuthApi({
           data.people[id] = { id, name, email, color: setup ? 'blue' : color, avatar: randomAnimalAvatar() };
           db.exec('BEGIN IMMEDIATE');
           try {
+            // The link may have been turned off or reset while the password was being hashed.
+            if (joinLink && !findJoinLink(String(input.join))) fail(403, 'An invitation is required');
             db.prepare(
               'INSERT INTO users(id,email,name,password,role,project_ids,project_roles,can_create_projects,disabled,created_at) VALUES(?,?,?,?,?,?,?,?,0,?)',
             ).run(
@@ -573,24 +734,33 @@ export function createAuthApi({
               email,
               name,
               encoded,
-              setup ? 'owner' : normalizeRole(invite.role),
-              setup ? null : invite.project_ids,
-              setup ? '{}' : (invite.project_roles ?? '{}'),
-              setup ? 1 : (invite.can_create_projects ?? 1),
+              setup ? 'owner' : invite ? normalizeRole(invite.role) : linked.role,
+              setup ? null : invite ? invite.project_ids : linked.projectIds && JSON.stringify(linked.projectIds),
+              setup ? '{}' : invite ? (invite.project_roles ?? '{}') : JSON.stringify(linked.projectRoles),
+              setup ? 1 : invite ? (invite.can_create_projects ?? 1) : Number(linked.canCreate),
               new Date().toISOString(),
             );
             if (setup) db.prepare('INSERT INTO workspace VALUES(1,?,1)').run(JSON.stringify(data));
             else db.prepare('UPDATE workspace SET data=?,revision=revision+1 WHERE id=1').run(JSON.stringify(data));
             if (invite) db.prepare('DELETE FROM invites WHERE token=?').run(invite.token);
+            if (joinLink) {
+              // Joined with the team link: a pending email invitation for the same address is used up too.
+              db.prepare('UPDATE join_links SET joined=joined+1 WHERE scope=?').run(joinLink.scope);
+              db.prepare('DELETE FROM invites WHERE email=?').run(email);
+            }
             db.exec('COMMIT');
           } catch (e) {
             db.exec('ROLLBACK');
             throw e;
           }
           user = publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
-          audit(id, 'account.created', email);
+          audit(id, joinLink ? 'account.joined' : 'account.created', joinLink ? `${email} · ${linked.role}` : email);
           if (!setup)
             broadcastRevision(current.revision + 1, id, undefined, { prev: current.data, next: data, changed: { records: { people: [id] } } });
+          if (joinLink?.scope) {
+            startSession(user, res);
+            return send(res, 200, { user, projectId: joinLink.scope });
+          }
         }
         startSession(user, res);
         return send(res, 200, { user });
@@ -611,7 +781,7 @@ export function createAuthApi({
             if (!row) return;
             const { url } = createResetToken(row.id, HOUR);
             audit(row.id, 'password.reset.requested', email);
-            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1 }) });
+            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1, assets: mail.publicUrl }) });
           });
         return send(res, 200, { ok: true });
       }
@@ -710,6 +880,13 @@ export function createAuthApi({
           members: rows.map((m) => ({ id: m.id, name: m.name, email: m.email, role: m.role, lastSeen: m.lastSeen, createdAt: m.createdAt })),
         });
       }
+      if (path === '/api/auth/join/accept' && req.method === 'POST') {
+        // Someone with an account opened an invite link: add what it opens and say where to go.
+        const input = await authenticatedBody(req, 4096);
+        const row = findJoinLink(input.token);
+        if (!row) fail(410, 'This invite link is invalid or has been turned off');
+        return send(res, 200, acceptJoinLink(user, row));
+      }
       if (path === '/api/presence' && req.method === 'POST') {
         const input = await authenticatedBody(req, 4096);
         const location = typeof input.path === 'string' && input.path.startsWith('/') ? input.path.slice(0, 200) : '';
@@ -763,6 +940,20 @@ export function createAuthApi({
           // Their open tabs learn about the new project access.
           if (grantCreated) notifyAccess(user.id);
           return send(res, 200, { revision });
+        }
+      }
+      if (path.startsWith('/api/projects/') && path.endsWith('/invite-link')) {
+        // A project's invite link: whoever opens it joins this project at the link's level.
+        const projectId = decodeURIComponent(path.split('/')[3] ?? '');
+        if (!readWorkspace()?.data.projects?.[projectId] || !canReadProject(user, projectId)) fail(404, 'Project not found');
+        if (!isAdmin(user)) fail(403, 'Administrator access required');
+        if (req.method === 'GET') return send(res, 200, { link: publicJoinLink(readJoinLink(projectId)) });
+        if (req.method === 'POST') {
+          const input = await authenticatedBody(req, 4096);
+          if (input.level !== undefined && !PROJECT_LEVELS.includes(input.level)) fail(400, 'Invalid access level');
+          return send(res, 200, {
+            link: publicJoinLink(saveJoinLink(projectId, { level: input.level, enabled: input.enabled, reset: !!input.reset }, user)),
+          });
         }
       }
       if (path.startsWith('/api/projects/') && path.endsWith('/access')) {
@@ -911,7 +1102,8 @@ export function createAuthApi({
         if (!isAdmin(user)) fail(403, 'Administrator access required');
         if (path === '/api/admin/members' && req.method === 'GET')
           return send(res, 200, {
-            mail: { configured: mail.configured, ...(mail.configured ? { from: mail.from } : {}) },
+            mail: mailStatus(user),
+            link: publicJoinLink(readJoinLink('')),
             members: db.prepare('SELECT * FROM users ORDER BY created_at').all().map(publicUser),
             invites: db
               .prepare(
@@ -982,8 +1174,12 @@ export function createAuthApi({
             const lang = langOf(input);
             const workspace = readWorkspace()?.data.workspace?.name;
             const inviter = displayName(user);
+            const projects = invitedProjects(projectIds);
             delivery = await mail.sendAll(
-              invites.map((i) => ({ to: i.email, ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires }) })),
+              invites.map((i) => ({
+                to: i.email,
+                ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires, email: i.email, projects, assets: mail.publicUrl }),
+              })),
             );
           }
           return send(res, 201, {
@@ -993,6 +1189,13 @@ export function createAuthApi({
             failed: delivery.failed,
             ...(invites.length === 1 ? invites[0] : {}),
           });
+        }
+        if (path === '/api/admin/invite-link' && req.method === 'POST') {
+          // The team link: on or off, the role it gives (editor or viewer), or a new link in place of the old one.
+          const input = await authenticatedBody(req, 4096);
+          const level = input.role ?? input.level;
+          if (level !== undefined && (!TEAM_LEVELS.includes(level) || !canAssignRole(user, level))) fail(400, 'The link can add editors or viewers');
+          return send(res, 200, { link: publicJoinLink(saveJoinLink('', { level, enabled: input.enabled, reset: !!input.reset }, user)) });
         }
         if (path === '/api/admin/invites/resend' && req.method === 'POST') {
           // A new link for a pending invitation (the old one stops working), emailed when email is set up.
@@ -1024,7 +1227,17 @@ export function createAuthApi({
             mail.configured &&
             (await mail.send({
               to: email,
-              ...inviteEmail({ lang: langOf(input), workspace, inviter: displayName(user), role, link: url, expires }),
+              ...inviteEmail({
+                lang: langOf(input),
+                workspace,
+                inviter: displayName(user),
+                role,
+                link: url,
+                expires,
+                email,
+                projects: invitedProjects(invite.project_ids),
+                assets: mail.publicUrl,
+              }),
             }));
           return send(res, 200, { email, token, url, expires, emailed });
         }
@@ -1042,15 +1255,55 @@ export function createAuthApi({
             mail.configured &&
             (await mail.send({
               to: target.email,
-              ...resetEmail({ lang: langOf(input), name: displayName(target), email: target.email, link: url, hours: 24, admin: displayName(user) }),
+              ...resetEmail({
+                lang: langOf(input),
+                name: displayName(target),
+                email: target.email,
+                link: url,
+                hours: 24,
+                admin: displayName(user),
+                assets: mail.publicUrl,
+              }),
             }));
           return send(res, 200, { token, url, expires, emailed });
+        }
+        if (path === '/api/admin/mail' && req.method === 'GET') return send(res, 200, { mail: mailStatus(user) });
+        if (path === '/api/admin/mail' && (req.method === 'PUT' || req.method === 'DELETE')) {
+          // Only the owner connects the team's mailbox: reset links travel through it.
+          if (user.role !== 'owner') fail(403, 'Only the owner can change email settings');
+          if (mail.fromEnv) fail(409, 'Email is set up on the server');
+          const input = await authenticatedBody(req, 8192);
+          if (req.method === 'DELETE') {
+            db.prepare("DELETE FROM app_settings WHERE key='mail'").run();
+            mail.configure(null);
+            audit(user.id, 'mail.removed');
+            return send(res, 200, { mail: mailStatus(user) });
+          }
+          if (!mailChecks(user.id)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+          let settings;
+          try {
+            settings = normalizeMailSettings(input, readSavedMail());
+          } catch (error) {
+            return send(res, 400, { error: error.message, field: error.field });
+          }
+          // Settings are saved only once a letter has really gone out with them, to the owner's own address.
+          const check = await mail.check(settings, {
+            to: user.email,
+            ...testEmail({ lang: langOf(input), link: `${settings.publicUrl}/`, assets: settings.publicUrl }),
+          });
+          if (!check.ok) return send(res, 422, { error: 'Could not send a letter with these settings', code: check.code });
+          db.prepare("INSERT INTO app_settings(key,value) VALUES('mail',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(
+            JSON.stringify(settings),
+          );
+          mail.configure(settings);
+          audit(user.id, 'mail.updated', `${settings.user} · ${settings.host}`);
+          return send(res, 200, { mail: mailStatus(user), to: user.email });
         }
         if (path === '/api/admin/mail/test' && req.method === 'POST') {
           const input = await authenticatedBody(req, 4096);
           if (!mail.configured) fail(400, 'Email is not set up on the server');
           if (!mailTests(user.id)) fail(429, 'Too many test emails. Try again in 15 minutes.');
-          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/` }) });
+          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/`, assets: mail.publicUrl }) });
           if (!ok) fail(502, 'Could not send the email. Check the SMTP settings and the server log.');
           return send(res, 200, { ok: true, to: user.email });
         }

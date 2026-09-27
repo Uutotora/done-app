@@ -47,7 +47,8 @@ export function createEmptyData(lang: Lang, name = ''): DataState {
   return {
     schema: SCHEMA_VERSION,
     onboarded: false,
-    workspace: { name: lang === 'ru' ? 'Мое пространство' : 'My workspace', icon: '🚀' },
+    // The team is named from the company's email domain at sign-up, or later in Settings.
+    workspace: { name: '', icon: '🚀' },
     meId: me.id,
     people: { [me.id]: me },
     groups: {},

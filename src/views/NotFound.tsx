@@ -15,7 +15,7 @@ export function NotFound() {
         <StatePanel
           page
           illustration="lost"
-          eyebrow={ru ? '404 · Немного сбились с пути' : '404 · A little off track'}
+          eyebrow="404"
           title={t('misc.notFound')}
           action={
             <>
@@ -24,19 +24,12 @@ export function NotFound() {
               </Link>
               <button type="button" className="state-link" onClick={() => useUI.getState().setPalette(true)}>
                 <Search size={15} />
-                {ru ? 'Найти в пространстве' : 'Search workspace'}
+                {ru ? 'Поиск' : 'Search'}
               </button>
             </>
           }
-          footer={
-            ru
-              ? 'Ожидали увидеть здесь проект? Уточните у его владельца, есть ли у вас доступ.'
-              : 'Expecting a project here? Check with its owner that you have access.'
-          }
         >
-          {ru
-            ? 'Возможно, страница переехала, была удалена или ссылка оказалась с опечаткой. Давайте вернёмся к вашим планам.'
-            : 'This page may have moved, been deleted, or the link has a typo. Let’s get you back to your plans.'}
+          {ru ? 'Её переместили, удалили, или у вас пока нет доступа.' : 'It was moved, deleted, or you don’t have access yet.'}
         </StatePanel>
       </div>
     </div>

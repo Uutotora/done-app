@@ -6,6 +6,12 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planeProxy } from './server/planeProxy.mjs';
 import { createAuthApi } from './server/auth.mjs';
+// DONE_* settings may live in a .env file next to the server; real environment variables win.
+try {
+  process.loadEnvFile?.();
+} catch {
+  /* no .env file */
+}
 const auth = createAuthApi();
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), 'dist');

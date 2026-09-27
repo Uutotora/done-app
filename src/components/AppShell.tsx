@@ -22,6 +22,7 @@ import { SidePeek } from './SidePeek';
 import { LinkDialog } from './files/LinkDialog';
 import { FilePreview } from './files/FilePreview';
 import { PageBoundary } from './PageFeedback';
+import { InviteDialog } from './access/InviteDialog';
 
 export function AppShell() {
   const location = useLocation();
@@ -96,6 +97,7 @@ export function AppShell() {
       <CommandPalette />
       <CreateItemDialog />
       <ShortcutsDialog />
+      <InviteDialog />
       <ProjectArchiveDialog />
       <LinkDialog />
       <FilePreview />

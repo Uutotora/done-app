@@ -33,6 +33,8 @@ interface UIState {
   peekItemId?: ID;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
+  /** "Invite people": opened from the profile menu, Settings > People or ⌘K. */
+  inviteOpen: boolean;
   createItem: CreateItemState;
   linkDialog: LinkDialogState;
   previewId?: ID;
@@ -42,6 +44,7 @@ interface UIState {
   openPeek: (id?: ID) => void;
   setPalette: (open: boolean) => void;
   setShortcuts: (open: boolean) => void;
+  setInvite: (open: boolean) => void;
   openCreateItem: (defaults?: Partial<Item>, templateId?: ID) => void;
   closeCreateItem: () => void;
   openLinkDialog: (opts?: Omit<LinkDialogState, 'open'>) => void;
@@ -59,6 +62,7 @@ export const useUI = create<UIState>()((set) => ({
   sidebarPeek: false,
   paletteOpen: false,
   shortcutsOpen: false,
+  inviteOpen: false,
   createItem: { open: false },
   linkDialog: { open: false },
   toasts: [],
@@ -66,6 +70,7 @@ export const useUI = create<UIState>()((set) => ({
   openPeek: (id) => set({ peekItemId: id }),
   setPalette: (open) => set({ paletteOpen: open }),
   setShortcuts: (open) => set({ shortcutsOpen: open }),
+  setInvite: (open) => set({ inviteOpen: open }),
   openCreateItem: (defaults, templateId) => set({ createItem: { open: true, defaults, templateId } }),
   closeCreateItem: () => set((s) => ({ createItem: { ...s.createItem, open: false } })),
   openLinkDialog: (opts) => set({ linkDialog: { open: true, ...opts } }),

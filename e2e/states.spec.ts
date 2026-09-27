@@ -10,7 +10,7 @@ test('404 offers working search and home on desktop, dark theme and mobile', asy
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.state-panel')).toHaveCSS('animation-name', 'none');
   await page.screenshot({ path: testInfo.outputPath('404-desktop.png') });
-  await page.getByRole('button', { name: 'Найти в пространстве' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Поиск', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Поиск', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Переключить тему', exact: true }).click();
@@ -29,24 +29,37 @@ test('invitation keeps verified identity, responsive layout and network retry', 
   await page.route('**/api/auth/invitation', async (route) => {
     if (!reachable) return route.fulfill({ status: 503, json: { error: 'Unavailable' } });
     return route.fulfill({
-      json: { email: 'teammate@example.test', workspace: 'Команда продукта', inviter: 'Александра', role: 'editor', expires: Date.now() + 86400000 },
+      json: {
+        email: 'teammate@example.test',
+        workspace: 'Команда продукта',
+        inviter: 'Александра',
+        inviterColor: 'purple',
+        role: 'editor',
+        expires: Date.now() + 86400000,
+      },
     });
   });
   await page.goto('/?invite=preview&email=wrong@example.test');
-  await expect(page.getByRole('heading', { name: 'Приглашение пока недоступно' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Приглашение не открылось' })).toBeVisible();
   reachable = true;
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Команда продукта', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Присоединяйтесь к «Команда продукта»', exact: true })).toBeVisible();
+  await expect(page.getByText('Александра приглашает вас как редактора')).toBeVisible();
+  // The illustration stays beside the form on a laptop.
+  const art = await page.locator('.auth-state-art').boundingBox();
+  const card = await page.locator('.auth-card').boundingBox();
+  expect(art!.x + art!.width).toBeLessThan(card!.x);
   await expect(page.getByText('teammate@example.test', { exact: true })).toBeVisible();
   await expect(page.getByText('wrong@example.test', { exact: true })).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.screenshot({ path: testInfo.outputPath('invitation-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(page.getByRole('button', { name: 'Присоединиться к команде', exact: true })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Присоединиться', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('invitation-mobile.png') });
   await page.getByRole('button', { name: 'EN', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Join the team', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join Команда продукта', exact: true })).toBeVisible();
 });
 
 test('reset connection failure never claims expiry and retries the same link', async ({ page }, testInfo) => {

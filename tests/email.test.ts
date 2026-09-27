@@ -139,8 +139,9 @@ describe('mail helpers', () => {
       link: `${PUBLIC}/?invite=t&email=a%40b.co`,
       expires: Date.UTC(2026, 9, 4),
     });
-    expect(letter.subject).toBe('Приглашение в <script>alert(1)</script> · Done');
+    expect(letter.subject).toBe('Eve <img src=x> приглашает вас в «<script>alert(1)</script>»');
     expect(letter.html).not.toMatch(/<script|<img/);
+    expect(letter.html).toContain('Eve &lt;img src=x&gt;');
     expect(letter.html).toContain('&lt;script&gt;');
     expect(letter.html).toContain('href="https://done.example.com/?invite=t&amp;email=a%40b.co"');
     expect(letter.text).toContain('Ваша роль: редактор.');
@@ -167,7 +168,7 @@ describe('email on the server', () => {
   it('tells the sign-in form and admins that email is on', async () => {
     expect((await (await s.call('/api/auth/session', 'GET', undefined, '')).json()).mail).toBe(true);
     const admin = await (await s.call('/api/admin/members')).json();
-    expect(admin.mail).toEqual({ configured: true, from: 'Done <noreply@example.com>' });
+    expect(admin.mail).toMatchObject({ configured: true, from: 'Done <noreply@example.com>', source: 'env', editable: false });
   });
 
   it('emails invitations with the link, the inviter and the escaped workspace name', async () => {
@@ -182,18 +183,25 @@ describe('email on the server', () => {
     expect(JSON.stringify(json)).not.toContain('secret');
     const letter = lastTo('new1@example.com')!;
     expect(letter.from).toBe('Done <noreply@example.com>');
-    expect(letter.subject).toBe('Приглашение в Acme <b>&</b> "Co" · Done');
+    expect(letter.subject).toBe('Olga <img src=x onerror=alert(1)> приглашает вас в «Acme <b>&</b> "Co"»');
     const token = json.invites.find((i: { email: string }) => i.email === 'new1@example.com').token;
     expect(letter.text).toContain(`${PUBLIC}/?invite=${token}&email=new1%40example.com`);
     expect(letter.text).toContain('Olga');
     expect(letter.text).toContain('наблюдатель');
-    expect(letter.html).not.toMatch(/<img|<b>/);
+    expect(letter.html).not.toMatch(/<img src=x|<b>/);
     expect(letter.html).toContain('Acme &lt;b&gt;&amp;&lt;/b&gt; &quot;Co&quot;');
+    // Only the app's own logo and illustration, loaded from the public address.
+    expect([...letter.html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1])).toEqual([
+      `${PUBLIC}/brand/done-mark.png`,
+      `${PUBLIC}/illustrations/states/team.png`,
+    ]);
+    expect(letter.text).toContain('Проекты: Все проекты.');
+    expect(letter.html).toContain('new1@example.com');
     expect(json.invites[0].url).toBe(`${PUBLIC}/?invite=${json.invites[0].token}&email=new1%40example.com`);
 
     const en = await (await s.call('/api/admin/invites', 'POST', { emails: 'new2@example.com', role: 'editor', lang: 'en' })).json();
     expect(en.emailed).toEqual(['new2@example.com']);
-    expect(lastTo('new2@example.com')!.subject).toBe('Invitation to Acme <b>&</b> "Co" · Done');
+    expect(lastTo('new2@example.com')!.subject).toBe('Olga <img src=x onerror=alert(1)> invited you to Acme <b>&</b> "Co"');
   });
 
   it('resends a pending invitation with a new link', async () => {
@@ -233,7 +241,16 @@ describe('email on the server', () => {
     expect(preview.headers.get('cache-control')).toContain('no-store');
     const details = await preview.json();
     expect(details).toMatchObject({ email: 'preview@example.com', workspace: 'Acme <b>&</b> "Co"', role: 'viewer' });
-    expect(Object.keys(details).sort()).toEqual(['email', 'expires', 'inviter', 'role', 'workspace']);
+    expect(Object.keys(details).sort()).toEqual([
+      'email',
+      'expires',
+      'inviter',
+      'inviterAvatar',
+      'inviterColor',
+      'inviterPhoto',
+      'role',
+      'workspace',
+    ]);
     const rotated = await (await s.call('/api/admin/invites/resend', 'POST', { email: 'preview@example.com' })).json();
     expect((await s.call('/api/auth/invitation', 'POST', { token: invite.token }, '')).status).toBe(410);
     expect((await s.call('/api/auth/invitation', 'POST', { token: rotated.token }, '')).status).toBe(200);
@@ -381,7 +398,7 @@ describe('without a public URL', () => {
 
   it('sends nothing and keeps links to share by hand', async () => {
     expect((await (await s.call('/api/auth/session', 'GET', undefined, '')).json()).mail).toBe(false);
-    expect((await (await s.call('/api/admin/members')).json()).mail).toEqual({ configured: false });
+    expect((await (await s.call('/api/admin/members')).json()).mail).toMatchObject({ configured: false });
     const invite = await (await s.call('/api/admin/invites', 'POST', { emails: ['x@example.com'], role: 'viewer' })).json();
     expect(invite).toMatchObject({ emailed: [], failed: [], url: null });
     expect(invite.token).toBeTruthy();

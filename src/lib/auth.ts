@@ -131,7 +131,8 @@ export async function api<T = Record<string, unknown>>(path: string, method = 'G
   const result = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
   if (!response.ok || !result || typeof result !== 'object') {
     const message = typeof result?.error === 'string' ? result.error : `Request failed (${response.status})`;
-    throw Object.assign(new Error(message), { status: response.status, json: !!result && typeof result === 'object' });
+    // The whole answer rides along, for errors that say which field or step failed.
+    throw Object.assign(new Error(message), { status: response.status, json: !!result && typeof result === 'object', body: result });
   }
   return result as T;
 }
@@ -574,8 +575,18 @@ export async function bootstrapAuth() {
     const result = await api<{ user: AuthUser | null; setup: boolean; mail?: boolean }>('/api/auth/session');
     useAuth.setState({ setup: result.setup, mail: !!result.mail });
     const params = new URLSearchParams(location.search);
+    // Signed in and opening an invite link: add what it leads to and go straight there.
+    if (params.has('join') && result.user && !params.has('reset') && !params.has('invite')) {
+      const accepted = await api<{ projectId: string | null }>('/api/auth/join/accept', 'POST', { token: params.get('join') }).catch(() => null);
+      if (accepted) {
+        window.history.replaceState({}, '', accepted.projectId ? `/p/${encodeURIComponent(accepted.projectId)}/overview` : '/');
+        const fresh = await api<{ user: AuthUser | null }>('/api/auth/session').catch(() => null);
+        await enterAccount(fresh?.user ?? result.user);
+        return;
+      }
+    }
     // Invitation and reset links come first, even when already signed in or in the demo.
-    if (params.has('reset') || params.has('invite')) {
+    if (params.has('reset') || params.has('invite') || params.has('join')) {
       dismissSignedOut();
       useAuth.setState({ mode: 'signedOut', user: result.user });
     } else if (result.user) await enterAccount(result.user);
@@ -585,25 +596,29 @@ export async function bootstrapAuth() {
     useAuth.setState({ mode: 'signedOut', signedOutReason: null, error: (e as Error).message });
   }
 }
-export async function enterLocal(withDemo = false) {
+/** The demo always opens filled with examples: there is no separate onboarding to walk through. */
+export async function seedDemo() {
+  if (useData.getState().onboarded) return;
+  const { createSampleData } = await import('./seed');
+  const { putFileBlob } = await import('./storage');
+  const lang = useData.getState().prefs.lang;
+  const { data, blobs } = createSampleData({
+    lang,
+    name: lang === 'ru' ? 'Гость' : 'Guest',
+    role: '',
+    workspaceName: lang === 'ru' ? 'Демо Done' : 'Done demo',
+  });
+  await Promise.all(blobs.map(([id, blob]) => putFileBlob(id, blob)));
+  data.prefs = { ...data.prefs, theme: useData.getState().prefs.theme, lang };
+  useData.getState().replaceAll(data);
+}
+export async function enterLocal() {
   dismissSignedOut();
   sessionStorage.setItem('done:mode', 'local');
   stopSync?.();
   setRemoteStorage(false);
   await useData.persist.rehydrate();
-  if (withDemo && !useData.getState().onboarded) {
-    const { createSampleData } = await import('./seed');
-    const { putFileBlob } = await import('./storage');
-    const lang = useData.getState().prefs.lang;
-    const { data, blobs } = createSampleData({
-      lang,
-      name: lang === 'ru' ? 'Гость' : 'Guest',
-      role: '',
-      workspaceName: lang === 'ru' ? 'Демо Done' : 'Done demo',
-    });
-    await Promise.all(blobs.map(([id, blob]) => putFileBlob(id, blob)));
-    useData.getState().replaceAll(data);
-  }
+  await seedDemo();
   useAuth.setState({ mode: 'local', user: null, error: '' });
 }
 export async function logout() {

@@ -11,7 +11,10 @@ Visual references supplied by the user:
 | Surface | States covered | Implementation |
 | --- | --- | --- |
 | Unknown route; missing project, item, document | 404, home, workspace search, access guidance | views/NotFound.tsx |
-| Invitation | Checking, ready, expired/revoked/used, connection failure, retry | components/AuthGate.tsx |
+| Invitation (email, team link, project link) | Checking, ready, project invitation, account already exists, expired/revoked/turned off, connection failure, retry, signed-in visitor | components/AuthGate.tsx |
+| Invite dialog and project sharing | Email + role, project access, team link on/off/reset, project link copy/level/reset/off, email not connected | components/access/InviteDialog.tsx, components/access/ProjectShare.tsx |
+| Email settings | Not connected, connect with presets, connection/auth/host errors, connected, set by the server | views/settings/Mail.tsx |
+| Invitation and password emails | Light and dark mail clients, plain text | server/mail.mjs, docs/previews/email |
 | Password recovery | Request, email confirmation, checking, new password, expired link, connection failure and retry | components/AuthRecovery.tsx |
 | Workspace route | Lazy loading, render failure with retry and home navigation | components/PageFeedback.tsx |
 | Inbox | Unread cleared, no notifications, empty archive | views/Inbox.tsx |
@@ -22,7 +25,7 @@ Visual references supplied by the user:
 | Sprints | No active sprint, no history | views/Sprints.tsx |
 | Project archive | Empty archive | components/ProjectArchive.tsx |
 | Trash | Empty trash vs. no search matches | components/Trash.tsx |
-| Invite members dialog | Prepared/sent/failed invitation summary | views/settings/People.tsx |
+| Invite results | Links to share when email is off or some letters failed | components/access/InviteDialog.tsx |
 
 The shared StatePanel and StateIllustration components provide consistent spacing, semantic headings, decorative image semantics, responsive sizing and reduced-motion behavior. Dark mode reverses the monochrome artwork. Large illustrations are reserved for page-level states; compact boards, timelines, table rows and inline notices retain their existing lightweight treatment. The existing welcome, sign-in, setup, sign-out and onboarding flows remain in place. Missing resources intentionally do not disclose whether an inaccessible resource exists.
 

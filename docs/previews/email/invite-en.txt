@@ -1,0 +1,11 @@
+Subject: Mike invited you to Acme
+
+Mike invited you to Acme
+
+Your access is ready. All that’s left is to accept the invitation.
+Your role: Viewer.
+Projects: All projects.
+
+Accept the invitation: https://done.company.ru/?invite=Xy7abc&email=anna%40company.ru
+
+This invitation for anna@company.com works until October 4. Not expecting it? You can safely ignore this email.

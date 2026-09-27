@@ -43,17 +43,14 @@ export function ForgotPassword({ ru, initialEmail, onBack }: { ru: boolean; init
       </button>
       {sent ? (
         <>
-          <p className="state-eyebrow">{ru ? 'Ещё один шаг' : 'One more step'}</p>
           <h1 className="text-[28px] font-bold leading-tight tracking-tight">{ru ? 'Проверьте почту' : 'Check your email'}</h1>
           <p className="mt-3 text-[14px] leading-relaxed text-fg-2">
             {ru
-              ? `Если для ${email} есть аккаунт, мы отправили на этот адрес ссылку для нового пароля. Она действует 1 час.`
-              : `If there is an account for ${email}, we sent a link to set a new password to that address. It works for 1 hour.`}
+              ? `Если у ${email} есть аккаунт, ссылка уже в пути. Она действует час.`
+              : `If ${email} has an account, the link is on its way. It works for an hour.`}
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-fg-3">
-            {ru
-              ? 'Письма нет? Проверьте папку «Спам» или попросите администратора прислать ссылку.'
-              : 'No email? Check your spam folder or ask your administrator for a link.'}
+            {ru ? 'Нет письма? Загляните в «Спам» или попросите ссылку у администратора.' : 'No email? Check spam or ask your admin for a link.'}
           </p>
           <Button onClick={() => onBack(email)} className="mt-7 w-full !bg-fg !text-bg hover:opacity-90" size="lg">
             {ru ? 'Вернуться ко входу' : 'Back to sign in'}
@@ -72,9 +69,7 @@ export function ForgotPassword({ ru, initialEmail, onBack }: { ru: boolean; init
         <>
           <h1 className="text-[28px] font-bold leading-tight tracking-tight">{ru ? 'Забыли пароль?' : 'Forgot your password?'}</h1>
           <p className="mb-6 mt-2 text-[14px] leading-relaxed text-fg-3">
-            {ru
-              ? 'Укажите почту, с которой входите в Done, и мы пришлем ссылку, чтобы задать новый пароль.'
-              : 'Enter the email you use for Done and we will send you a link to set a new password.'}
+            {ru ? 'Пришлём ссылку, чтобы задать новый пароль.' : 'We’ll email you a link to set a new one.'}
           </p>
           {mail ? (
             <form onSubmit={submit} className="space-y-4">
@@ -196,12 +191,9 @@ export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; 
         </>
       ) : state === 'invalid' ? (
         <>
-          <p className="state-eyebrow">{ru ? 'Давайте попробуем снова' : 'Let’s try again'}</p>
           <h1 className="text-[28px] font-bold leading-tight tracking-tight">{ru ? 'Ссылка больше не работает' : 'This link no longer works'}</h1>
           <p className="mt-3 text-[14px] leading-relaxed text-fg-2">
-            {ru
-              ? 'Ссылка для сброса пароля устарела или уже использована. Запросите новую — она придет на почту.'
-              : 'This password reset link has expired or has already been used. Request a new one and it will arrive by email.'}
+            {ru ? 'Она устарела или уже использована. Запросите новую.' : 'It has expired or was already used. Request a new one.'}
           </p>
           <Button onClick={onForgot} className="mt-7 w-full !bg-fg !text-bg hover:opacity-90" size="lg" iconRight={<ArrowRight size={16} />}>
             {ru ? 'Запросить новую ссылку' : 'Request a new link'}
@@ -216,11 +208,11 @@ export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; 
           <p className="mb-6 mt-2 text-[14px] leading-relaxed text-fg-3">
             {account
               ? ru
-                ? `Для ${account.email}. После сохранения вы войдете в Done, а остальные сеансы завершатся.`
-                : `For ${account.email}. After saving you will be signed in, and other sessions will end.`
+                ? `Для ${account.email}. Другие сеансы завершатся.`
+                : `For ${account.email}. Other sessions will be signed out.`
               : ru
-                ? 'После сохранения вы войдете в Done, а остальные сеансы завершатся.'
-                : 'After saving you will be signed in, and other sessions will end.'}
+                ? 'Другие сеансы завершатся.'
+                : 'Other sessions will be signed out.'}
           </p>
           <form onSubmit={submit} className="space-y-4">
             {/* Lets password managers save the new password for the right account. */}

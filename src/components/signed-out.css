@@ -4,18 +4,6 @@
   text-align: center;
   padding-block: 32px;
 }
-.signed-out-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 76px;
-  height: 76px;
-  margin: 0 auto 28px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  color: var(--text);
-  background: var(--bg-hover);
-}
 .signed-out-screen h1 {
   margin: 0;
   color: var(--text);

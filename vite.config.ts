@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,10 @@ function planeProxyPlugin(): Plugin {
     },
   };
 }
+
+// DONE_* settings (email, public address, database) may live in a local .env file.
+for (const [key, value] of Object.entries(loadEnv(process.env.NODE_ENV === 'production' ? 'production' : 'development', process.cwd(), 'DONE_')))
+  process.env[key] ??= value;
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), planeProxyPlugin()],

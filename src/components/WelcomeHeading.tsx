@@ -21,7 +21,7 @@ export function WelcomeHeading({ ru, reducedMotion }: { ru: boolean; reducedMoti
         ))}
       </h1>
       <p className="auth-welcome-description">
-        {ru ? 'Проекты, задачи и команда — в одном пространстве.' : 'Projects, tasks, and your team. All in one place.'}
+        {ru ? 'Проекты, задачи и команда — в одном месте.' : 'Projects, tasks, and your team. All in one place.'}
       </p>
     </div>
   );

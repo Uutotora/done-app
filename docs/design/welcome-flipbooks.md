@@ -7,7 +7,7 @@ The two matching SVG stars have been replaced by two different original ink flip
 
 Both sheets are 1536 × 1024 pixels, with six columns and four rows of 256-pixel cells. CSS selects one complete cell at a time using the existing step-end playback sequence. The two objects have different sizes and tilts, with room around the central illustration, heading and email form. They are decorative, cannot intercept clicks, disappear below 981 pixels, and become still when reduced motion is requested. The central people illustration and the water lettering are unchanged.
 
-The generated objects are fully contained inside their cells; source boundaries were checked for all 48 frames. Browser checks observe all 24 background positions for each object, ensure the separate assets load, exercise reduced motion and verify layout at laptop, large desktop, breakpoint and phone sizes.
+The generated objects are fully contained inside their cells; source boundaries were checked for all 48 frames. Visual review confirms that both assets load and render cleanly. Browser tests observe all 24 background positions for each object, exercise reduced motion and verify layout at laptop, large desktop, breakpoint and phone sizes.
 
 ## Notebook prompt
 

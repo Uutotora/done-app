@@ -284,7 +284,9 @@ describe('comments on the server', () => {
     const task = data.items.t1 as Record<string, unknown>;
     delete data.items.t1;
     delete data.comments.c1;
-    data.trash = [{ id: 'tr1', kind: 'item', title: 'One', snapshot: { items: { t1: task }, comments: { c1: c } }, deletedAt: ts }];
+    data.trash = [
+      { id: 'tr1', kind: 'item', title: 'One', snapshot: { items: { t1: task }, comments: { c1: c } }, deletedAt: ts },
+    ];
     const restore = { records: { items: { t1: { before: null, after: task } }, comments: { c1: { before: null, after: c } } } };
     // Ben did not write this comment and is not among its reactors, but restoring it verbatim is fine.
     expect(status(() => applyChanges(data, restore, ben))).toBe(200);

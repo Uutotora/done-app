@@ -268,8 +268,7 @@ describe('templates on the server', () => {
   });
 
   it('validates repeat rules of tasks', async () => {
-    const add = (id: string, recurrence: unknown) =>
-      patch('owner', { records: { items: { [id]: { before: null, after: task(id, 'alpha', { recurrence }) } } } });
+    const add = (id: string, recurrence: unknown) => patch('owner', { records: { items: { [id]: { before: null, after: task(id, 'alpha', { recurrence }) } } } });
     expect((await add('r-ok', { freq: 'weekly', interval: 2 })).status).toBe(200);
     expect((await add('r-day', { freq: 'monthly', interval: 1, day: 31 })).status).toBe(200);
     expect((await add('r-freq', { freq: 'hourly', interval: 1 })).status).toBe(400);

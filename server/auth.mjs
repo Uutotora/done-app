@@ -69,7 +69,7 @@ const HOUR = 3600000;
 /** Counts requests per key in a fixed window; the map stays bounded under a flood of keys. */
 function createLimiter(max, windowMs, cap = 10000) {
   const hits = new Map();
-  return (key) => {
+  const limit = (key) => {
     const now = Date.now();
     let entry = hits.get(key);
     if (!entry || entry.reset <= now) {
@@ -87,11 +87,36 @@ function createLimiter(max, windowMs, cap = 10000) {
     }
     return entry.count <= max;
   };
+  /** Gives back a request that went fine, such as a correct password or a valid link, so only failures add up. */
+  limit.refund = (key) => {
+    const entry = hits.get(key);
+    if (entry && entry.reset > Date.now() && entry.count > 0) entry.count--;
+  };
+  return limit;
 }
+/** DONE_TRUST_PROXY: `true` or the number of reverse proxies in front of Done; anything else means none. */
+const proxyHops = (value) => (/^true$/i.test(String(value ?? '')) ? 1 : Math.max(0, Math.floor(Number(value) || 0)));
+/**
+ * The address a request came from. Behind a reverse proxy every request arrives from the proxy itself, so the
+ * address is read from X-Forwarded-For, counting `hops` entries from the right: the entries further left were
+ * sent by the client and could be anything. Without a trusted proxy the header is ignored.
+ */
+const clientAddress = (req, hops) => {
+  if (hops > 0) {
+    const chain = String(req.headers['x-forwarded-for'] ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (chain.length) return chain[Math.max(0, chain.length - hops)];
+  }
+  return `${req.socket.remoteAddress}`;
+};
 
 export function createAuthApi({
   filename = process.env.DONE_DB_PATH || resolve('.data/done.sqlite'),
   secure = process.env.DONE_SECURE_COOKIES === 'true',
+  // How many reverse proxies stand in front of Done; they tell who is connecting through X-Forwarded-For.
+  trustProxy = process.env.DONE_TRUST_PROXY,
   // Uploaded files live next to the database unless DONE_FILES_DIR says otherwise; an in-memory database gets a temporary directory.
   filesDir = filename === ':memory:' ? undefined : resolve(process.env.DONE_FILES_DIR || resolve(dirname(filename), 'files')),
   maxUploadMb = Number(process.env.DONE_MAX_UPLOAD_MB) > 0 ? Number(process.env.DONE_MAX_UPLOAD_MB) : DEFAULT_MAX_UPLOAD_MB,
@@ -167,7 +192,11 @@ export function createAuthApi({
     db.exec("ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'access'; UPDATE audit SET kind='content' WHERE action='project.created';");
   }
   db.exec('CREATE INDEX IF NOT EXISTS audit_kind ON audit(kind, id)');
-  const attempts = new Map();
+  const hops = proxyHops(trustProxy);
+  // Sign-in and sign-up: a whole team behind one office address may sign in at once, so only failures add up.
+  // One account from one address gets 10 wrong passwords, one address 50 failures across all accounts.
+  const signInsByAccount = createLimiter(10, 15 * 60000);
+  const signInsByAddress = createLimiter(50, 15 * 60000);
   // Email settings saved in Settings > Email; the environment still wins when it sets SMTP.
   const readSavedMail = () => parse(db.prepare("SELECT value FROM app_settings WHERE key='mail'").get()?.value, null);
   const mail = createMail({
@@ -646,7 +675,8 @@ export function createAuthApi({
         return send(res, 200, { user, setup: !db.prepare('SELECT id FROM users LIMIT 1').get(), mail: mail.configured });
       // A token proves possession of the invitation; email query parameters are never trusted.
       if (path === '/api/auth/invitation' && req.method === 'POST') {
-        if (!invitationLookups(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const address = clientAddress(req, hops);
+        if (!invitationLookups(address)) fail(429, 'Too many attempts. Try again in 15 minutes.');
         const input = await body(req, 4096);
         if (typeof input.token !== 'string' || input.token.length > 256) fail(410, 'This invitation is invalid or has expired');
         const invitation = db
@@ -656,6 +686,7 @@ export function createAuthApi({
           .get(hash(input.token), Date.now());
         if (!invitation || db.prepare('SELECT id FROM users WHERE email=?').get(invitation.email))
           fail(410, 'This invitation is invalid or has expired');
+        invitationLookups.refund(address);
         const data = readWorkspace()?.data;
         const person = data?.people?.[invitation.created_by];
         return send(res, 200, {
@@ -671,10 +702,12 @@ export function createAuthApi({
       }
       // The team's shareable link: what it opens, without any account or project details.
       if (path === '/api/auth/join' && req.method === 'POST') {
-        if (!invitationLookups(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const address = clientAddress(req, hops);
+        if (!invitationLookups(address)) fail(429, 'Too many attempts. Try again in 15 minutes.');
         const input = await body(req, 4096);
         const row = findJoinLink(input.token);
         if (!row) fail(410, 'This invite link is invalid or has been turned off');
+        invitationLookups.refund(address);
         return send(res, 200, joinPreview(row));
       }
       if (['/api/auth/register', '/api/auth/login'].includes(path) && req.method === 'POST') {
@@ -682,12 +715,18 @@ export function createAuthApi({
         const email = String(input.email ?? '')
           .trim()
           .toLowerCase();
-        const key = `${req.socket.remoteAddress}`;
-        const limit = attempts.get(key);
-        if (limit && limit.reset > Date.now() && limit.count >= 15) fail(429, 'Too many attempts. Try again in 15 minutes.');
-        if (!limit || limit.reset <= Date.now()) attempts.set(key, { count: 1, reset: Date.now() + 900000 });
-        else limit.count++;
-        if (attempts.size > 10000) for (const [k, v] of attempts) if (v.reset < Date.now()) attempts.delete(k);
+        const address = clientAddress(req, hops);
+        const account = `${address} ${email.slice(0, 254)}`;
+        // Every attempt counts while it runs, so guesses sent all at once cannot slip past; one that succeeds is given back.
+        if (!signInsByAddress(address)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        if (!signInsByAccount(account)) {
+          signInsByAddress.refund(address);
+          fail(429, 'Too many attempts. Try again in 15 minutes.');
+        }
+        const succeeded = () => {
+          signInsByAddress.refund(address);
+          signInsByAccount.refund(account);
+        };
         const password = typeof input.password === 'string' ? input.password : '';
         if (password.length > 256 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) fail(400, 'Enter a valid email and password');
         if (path.endsWith('/login')) {
@@ -697,6 +736,7 @@ export function createAuthApi({
           if (!timingSafeEqual(actual, Buffer.from(expected, 'hex')) || !row || row.disabled) fail(401, 'Incorrect email or password');
           const fresh = db.prepare('SELECT * FROM users WHERE id=?').get(row.id);
           if (fresh.disabled || fresh.password !== row.password) fail(401, 'Incorrect email or password');
+          succeeded();
           user = publicUser(fresh);
           audit(user.id, 'account.login');
         } else {
@@ -714,6 +754,7 @@ export function createAuthApi({
             : null;
           const joinLink = !setup && !invite && input.join ? findJoinLink(String(input.join)) : undefined;
           if (!setup && !invite && !joinLink) fail(403, 'An invitation is required');
+          succeeded();
           if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) fail(409, 'Account already exists');
           const linked = joinLink ? linkAccess(joinLink) : null;
           const id = randomUUID();
@@ -768,7 +809,7 @@ export function createAuthApi({
       if (path === '/api/auth/reset/request' && req.method === 'POST') {
         // Always the same answer, right away, so nobody can find out which addresses have accounts.
         const input = await body(req, 4096);
-        if (!resetRequestsByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        if (!resetRequestsByIp(clientAddress(req, hops))) fail(429, 'Too many attempts. Try again in 15 minutes.');
         const email = String(input.email ?? '')
           .trim()
           .toLowerCase();
@@ -787,14 +828,16 @@ export function createAuthApi({
       }
       if (path === '/api/auth/reset/check' && req.method === 'POST') {
         const input = await body(req, 4096);
-        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        const address = clientAddress(req, hops);
+        if (!resetLinksByIp(address)) fail(429, 'Too many attempts. Try again in 15 minutes.');
         const row = findReset(input.token);
         if (!row) fail(410, 'This link is invalid or has expired');
+        resetLinksByIp.refund(address);
         return send(res, 200, { email: row.email, name: displayName(row) });
       }
       if (path === '/api/auth/reset' && req.method === 'POST') {
         const input = await body(req, 4096);
-        if (!resetLinksByIp(`${req.socket.remoteAddress}`)) fail(429, 'Too many attempts. Try again in 15 minutes.');
+        if (!resetLinksByIp(clientAddress(req, hops))) fail(429, 'Too many attempts. Try again in 15 minutes.');
         const password = typeof input.password === 'string' ? input.password : '';
         if (password.length < 12 || password.length > 256) fail(400, 'Use 12–256 characters for the password');
         const row = findReset(input.token);

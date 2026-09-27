@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, scrypt, createHash, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import {
   applyChanges,
   canReadProject,
@@ -15,6 +16,16 @@ import {
   validateState,
   visibleState,
 } from './access.mjs';
+import {
+  INLINE_IMAGE_TYPES,
+  cleanFileName,
+  cleanMime,
+  contentDisposition,
+  createBlobStore,
+  servedMime,
+  uploadReferences,
+  validBlobId,
+} from './blobs.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -43,10 +54,19 @@ const publicUser = (row) =>
 const ROLE_INPUT = ['owner', 'admin', 'editor', 'viewer'];
 const PERSON_COLORS = ['blue', 'purple', 'green', 'orange', 'pink', 'yellow', 'red', 'brown'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MB = 1024 * 1024;
+/** Same default as MAX_UPLOAD_MB in src/lib/storage.ts. */
+const DEFAULT_MAX_UPLOAD_MB = 100;
+/** Images and files inserted into pages, tasks and project briefs. */
+const EDITOR_UPLOAD_MB = 20;
+const CLEANUP_EVERY = 6 * 3600000;
 
 export function createAuthApi({
   filename = process.env.DONE_DB_PATH || resolve('.data/done.sqlite'),
   secure = process.env.DONE_SECURE_COOKIES === 'true',
+  // Uploaded files live next to the database unless DONE_FILES_DIR says otherwise; an in-memory database gets a temporary directory.
+  filesDir = filename === ':memory:' ? undefined : resolve(process.env.DONE_FILES_DIR || resolve(dirname(filename), 'files')),
+  maxUploadMb = Number(process.env.DONE_MAX_UPLOAD_MB) > 0 ? Number(process.env.DONE_MAX_UPLOAD_MB) : DEFAULT_MAX_UPLOAD_MB,
 } = {}) {
   if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
@@ -55,8 +75,7 @@ export function createAuthApi({
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, project_ids TEXT, expires INTEGER NOT NULL, created_by TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, revision INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS blobs (id TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);`);
   // Columns added after the first release; older databases are upgraded in place.
   const addColumn = (table, name, definition) => {
     if (
@@ -74,6 +93,23 @@ export function createAuthApi({
   addColumn('invites', 'can_create_projects', 'INTEGER NOT NULL DEFAULT 1');
   addColumn('invites', 'created_at', 'INTEGER');
   db.exec("UPDATE users SET role='editor' WHERE role='member'; UPDATE invites SET role='editor' WHERE role='member';");
+  // File bytes: on disk, metadata in SQLite. Files kept in the database by earlier versions move to disk once.
+  const blobs = createBlobStore(db, filesDir ? { dir: filesDir } : { temporary: true });
+  blobs.migrate();
+  const maxUpload = Math.floor(maxUploadMb * MB);
+  const editorUpload = Math.min(EDITOR_UPLOAD_MB * MB, maxUpload);
+  const cleanup = () => {
+    try {
+      const { deleted } = blobs.collectGarbage();
+      if (deleted) console.log(`Done: removed ${deleted} unused file(s)`);
+    } catch (e) {
+      console.error('Done: file cleanup failed:', e.message);
+    }
+  };
+  const firstCleanup = setTimeout(cleanup, 10000);
+  firstCleanup.unref?.();
+  const cleanupTimer = setInterval(cleanup, CLEANUP_EVERY);
+  cleanupTimer.unref?.();
   const attempts = new Map();
   const audit = (user, action, detail = '') =>
     db.prepare('INSERT INTO audit(actor,action,detail,at) VALUES(?,?,?,?)').run(user, action, detail, new Date().toISOString());
@@ -196,6 +232,63 @@ export function createAuthApi({
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
     res.end(JSON.stringify(value));
   };
+  /** File uploads whose body is the file itself rather than JSON. They keep the header and origin checks. */
+  const rawUpload = (req, path) =>
+    (req.method === 'PUT' && path.startsWith('/api/blobs/') && /^application\/octet-stream\s*(;|$)/i.test(req.headers['content-type'] ?? '')) ||
+    (req.method === 'POST' && path === '/api/uploads');
+  const blobIdOf = (path, prefix) => {
+    let id = '';
+    try {
+      id = decodeURIComponent(path.slice(prefix.length));
+    } catch {
+      /* rejected below */
+    }
+    if (!validBlobId(id)) fail(400, 'Invalid file id');
+    return id;
+  };
+  /** A percent-encoded header value (file names are not limited to ASCII), or null. */
+  const headerText = (value) => {
+    try {
+      return typeof value === 'string' ? decodeURIComponent(value) : null;
+    } catch {
+      return null;
+    }
+  };
+  const tooLarge = (res, limit) => send(res, 413, { error: 'File is too large', maxMb: Math.floor(limit / MB) });
+  /** Streams a stored file with its length; a HEAD request gets the headers only. */
+  async function sendBlob(req, res, id, headers) {
+    const blob = await blobs.read(id);
+    if (!blob) fail(404, 'File not found');
+    res.writeHead(200, { ...headers, 'content-length': String(blob.size) });
+    if (req.method === 'HEAD' || blob.buffer) {
+      await blob.handle?.close();
+      res.end(req.method === 'HEAD' ? undefined : blob.buffer);
+      return true;
+    }
+    try {
+      await pipeline(blob.handle.createReadStream(), res);
+    } catch {
+      // The browser went away in the middle of the download.
+      res.destroy();
+    }
+    return true;
+  }
+  // Projects, and which pages link to each editor upload, rebuilt only when the workspace revision changes.
+  let uploadIndex = { revision: -1, projects: new Set(), refs: new Map() };
+  const currentUploadIndex = () => {
+    const row = db.prepare('SELECT revision FROM workspace WHERE id=1').get();
+    if (row && row.revision !== uploadIndex.revision) {
+      const data = readWorkspace().data;
+      uploadIndex = { revision: row.revision, projects: new Set(Object.keys(data.projects ?? {})), refs: uploadReferences(data) };
+    }
+    return uploadIndex;
+  };
+  /** An upload is visible to whoever can read the project it was added in, or a page, task or brief that shows it. */
+  const canReadUpload = (user, meta) => {
+    const index = currentUploadIndex();
+    const readable = (scope) => (scope ? index.projects.has(scope) && canReadProject(user, scope) : canReadProject(user, undefined));
+    return readable(meta.scope ?? '') || [...(index.refs.get(meta.id) ?? [])].some(readable);
+  };
   // Projects deleted since access was given are dropped instead of failing the whole change.
   const projectsInput = (value) => {
     if (value === null || value === undefined) return null;
@@ -236,8 +329,9 @@ export function createAuthApi({
       !path.startsWith('/api/auth/') &&
       !path.startsWith('/api/admin/') &&
       !path.startsWith('/api/projects/') &&
-      !['/api/workspace', '/api/events', '/api/presence', '/api/members'].includes(path) &&
-      !path.startsWith('/api/blobs/')
+      !['/api/workspace', '/api/events', '/api/presence', '/api/members', '/api/uploads'].includes(path) &&
+      !path.startsWith('/api/blobs/') &&
+      !path.startsWith('/api/uploads/')
     ) {
       next?.();
       return false;
@@ -252,7 +346,7 @@ export function createAuthApi({
           (origin && (allowedOrigin ? origin !== allowedOrigin : new URL(origin).host !== req.headers.host))
         )
           fail(403, 'Invalid request origin');
-        if (!req.headers['content-type']?.startsWith('application/json')) fail(415, 'JSON required');
+        if (!req.headers['content-type']?.startsWith('application/json') && !rawUpload(req, path)) fail(415, 'JSON required');
       }
       let user = authenticate(req);
       if (path === '/api/auth/session' && req.method === 'GET')
@@ -465,32 +559,103 @@ export function createAuthApi({
         }
       }
       if (path.startsWith('/api/blobs/')) {
-        const id = decodeURIComponent(path.slice('/api/blobs/'.length));
-        const file = readWorkspace().data.files[id];
+        const id = blobIdOf(path, '/api/blobs/');
+        const files = readWorkspace().data.files;
+        const file = Object.hasOwn(files, id) ? files[id] : undefined;
         if (!file || !canReadProject(user, file.projectId)) fail(404, 'File not found');
-        if (req.method === 'GET') {
-          const blob = db.prepare('SELECT * FROM blobs WHERE id=?').get(id);
-          if (!blob) fail(404, 'File not found');
-          res.writeHead(200, {
-            'content-type': blob.mime,
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          // Editor uploads are only served by /api/uploads, with their own access rules.
+          if (blobs.meta(id)?.kind === 'upload') fail(404, 'File not found');
+          return await sendBlob(req, res, id, {
+            'content-type': cleanMime(file.mime),
             'cache-control': 'no-store',
             'x-content-type-options': 'nosniff',
             'content-disposition': 'attachment',
+            'content-security-policy': "default-src 'none'; sandbox",
           });
-          res.end(blob.data);
-          return;
         }
         if (req.method === 'PUT') {
           if (!canWriteProject(user, file.projectId)) fail(403, 'Read-only access');
-          const input = await authenticatedBody(req, 30 * 1024 * 1024);
-          if (typeof input.base64 !== 'string') fail(400, 'Invalid file');
-          db.prepare('INSERT OR REPLACE INTO blobs VALUES(?,?,?)').run(
-            id,
-            file.mime || 'application/octet-stream',
-            Buffer.from(input.base64, 'base64'),
-          );
+          if (blobs.meta(id)?.kind === 'upload') fail(409, 'This file id is taken');
+          const meta = { kind: 'file', mime: file.mime || 'application/octet-stream', scope: file.projectId ?? '', owner: user.id };
+          // The session and the file record must still be there once the last byte has arrived.
+          const stillAllowed = () => {
+            const current = authenticate(req);
+            if (!current) fail(401, 'Sign in to continue');
+            const latest = readWorkspace().data.files;
+            if (!Object.hasOwn(latest, id) || !canWriteProject(current, latest[id].projectId)) fail(403, 'Read-only access');
+          };
+          try {
+            if (rawUpload(req, path)) await blobs.write(id, req, { ...meta, limit: maxUpload, beforeCommit: stillAllowed });
+            else {
+              // Browsers opened before the update still send base64 inside JSON.
+              const input = await authenticatedBody(req, 30 * MB);
+              if (typeof input.base64 !== 'string') fail(400, 'Invalid file');
+              const bytes = Buffer.from(input.base64, 'base64');
+              if (bytes.length > maxUpload) fail(413, 'File is too large');
+              stillAllowed();
+              blobs.putBuffer(id, bytes, meta);
+            }
+          } catch (e) {
+            if (e.status === 413) return tooLarge(res, maxUpload);
+            throw e;
+          }
           return send(res, 200, { ok: true });
         }
+      }
+      // Images and files inserted into a page, task or project brief (the editor's uploads).
+      if (path === '/api/uploads' && req.method === 'POST') {
+        // scope: the project of the page, task or brief being edited, or "workspace" for pages outside projects.
+        const scope = new URL(req.url || '/', 'http://localhost').searchParams.get('scope');
+        if (!scope) fail(400, 'Choose where the file belongs');
+        const projectId = scope === 'workspace' ? undefined : scope;
+        if (projectId !== undefined && (!currentUploadIndex().projects.has(projectId) || !canReadProject(user, projectId)))
+          fail(404, 'Project not found');
+        if (!canWriteProject(user, projectId)) fail(403, 'Read-only access');
+        let id;
+        do id = `u${randomBytes(18).toString('base64url')}`;
+        while (blobs.meta(id));
+        try {
+          await blobs.write(id, req, {
+            kind: 'upload',
+            mime: req.headers['content-type'],
+            scope: projectId ?? '',
+            owner: user.id,
+            name: cleanFileName(headerText(req.headers['x-done-file-name'])),
+            limit: editorUpload,
+            beforeCommit: () => {
+              const current = authenticate(req);
+              if (!current || !canWriteProject(current, projectId)) fail(403, 'Read-only access');
+            },
+          });
+        } catch (e) {
+          if (e.status === 413) return tooLarge(res, editorUpload);
+          throw e;
+        }
+        return send(res, 201, { id, url: `/api/uploads/${id}` });
+      }
+      if (path.startsWith('/api/uploads/') && (req.method === 'GET' || req.method === 'HEAD')) {
+        const id = blobIdOf(path, '/api/uploads/');
+        const meta = blobs.meta(id);
+        if (!meta || meta.kind !== 'upload' || !canReadUpload(user, meta)) fail(404, 'File not found');
+        const inline = INLINE_IMAGE_TYPES.includes(meta.mime);
+        const headers = {
+          // Only plain raster images are shown in place; SVG, HTML and everything else is a download.
+          'content-type': inline ? meta.mime : servedMime(meta.mime),
+          'content-disposition': contentDisposition(inline ? 'inline' : 'attachment', meta.name),
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+          'cross-origin-resource-policy': 'same-origin',
+          // Uploads never change, so the browser revalidates cheaply; access is checked every time.
+          'cache-control': 'private, no-cache',
+          etag: `"${id}"`,
+        };
+        if (req.headers['if-none-match'] === headers.etag) {
+          res.writeHead(304, { etag: headers.etag, 'cache-control': headers['cache-control'] });
+          res.end();
+          return true;
+        }
+        return await sendBlob(req, res, id, headers);
       }
       if (path.startsWith('/api/admin/')) {
         if (!isAdmin(user)) fail(403, 'Administrator access required');
@@ -627,11 +792,17 @@ export function createAuthApi({
   return {
     handler,
     authenticate,
+    /** Runs the unused-file cleanup now (it also runs shortly after start and every 6 hours). */
+    collectGarbage: (now) => blobs.collectGarbage(now),
+    filesDir: blobs.dir,
     close: () => {
       clearInterval(heartbeat);
+      clearTimeout(firstCleanup);
+      clearInterval(cleanupTimer);
       for (const stream of streams) stream.res.end();
       streams.clear();
       db.close();
+      blobs.close();
     },
   };
 }

@@ -34,10 +34,12 @@ async function serveFile(res, file, cache) {
   res.end(data);
 }
 
-createServer(async (req, res) => {
+// Large uploads on slow connections need longer than Node's default of 5 minutes per request.
+createServer({ requestTimeout: 15 * 60000 }, async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
 
-  if (/^\/api\/(auth\/|admin\/|projects\/|workspace$|events$|presence$|members$|blobs\/)/.test(url.pathname)) return auth.handler(req, res);
+  if (/^\/api\/(auth\/|admin\/|projects\/|workspace$|events$|presence$|members$|blobs\/|uploads$|uploads\/)/.test(url.pathname))
+    return auth.handler(req, res);
 
   if (url.pathname.startsWith('/api/plane/')) {
     if (!auth.authenticate(req)) {

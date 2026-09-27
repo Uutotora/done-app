@@ -9,7 +9,7 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
   await expect(page.locator('.auth-flipbook')).toBeVisible();
-  await expect(page.locator('.auth-material')).toHaveClass(/auth-material-water/);
+  await expect(page.locator('.auth-material').first()).toHaveClass(/auth-material-water/);
   await page.screenshot({ path: testInfo.outputPath('welcome.png'), animations: 'disabled' });
   await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
   await page.getByRole('button', { name: 'Продолжить с почтой' }).click();

@@ -4,11 +4,15 @@ test('welcome fits a laptop and a phone, respects reduced motion, and keeps one 
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
+  await expect(page.locator('.auth-reveal-line')).toHaveCount(3);
+  await expect(page.locator('.auth-reveal-line').getByText('🌤️', { exact: true })).toHaveCount(1);
+  await expect(page.locator('.auth-reveal-line').getByText('👋', { exact: true })).toBeVisible();
+  await expect(page.locator('.auth-reveal-line').getByText('😊', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Посмотреть демо' })).toBeInViewport();
   await expect(page.locator('.auth-artwork')).toHaveCSS('width', '240px');
   await expect(page.getByRole('img', { name: 'Done', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /анимацию|Вода|Солнце|Звёзды/ })).toHaveCount(0);
-  await expect(page.locator('.auth-material-water')).toBeVisible();
+  await expect(page.locator('.auth-material-water').first()).toBeVisible();
   await expect(page.locator('.auth-flipbook')).toHaveCSS('animation-duration', '2s');
   // Observe the actual playback, ensuring all 24 sprite cells are displayed.
   const displayedFrames = await page.evaluate(
@@ -33,7 +37,17 @@ test('welcome fits a laptop and a phone, respects reduced motion, and keeps one 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.auth-flipbook')).toHaveCSS('animation-name', 'none');
-  await expect(page.locator('.auth-material')).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.auth-material').first()).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.auth-material').first()).toHaveCSS('transform', 'none');
+  // Reduced motion must reveal every letter immediately, including a mid-reveal language switch.
+  const visibleLetters = await page.locator('.auth-reveal-line [aria-hidden="true"] > span > span').evaluateAll((letters) =>
+    letters.every((letter) => {
+      const text = letter.getBoundingClientRect();
+      const mask = letter.parentElement!.getBoundingClientRect();
+      return text.top >= mask.top - 1 && text.bottom <= mask.bottom + 1;
+    }),
+  );
+  expect(visibleLetters).toBe(true);
   await expect(page.getByRole('button', { name: 'Включить анимацию' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await expect(page.getByRole('button', { name: 'Продолжить с почтой' })).toBeInViewport();

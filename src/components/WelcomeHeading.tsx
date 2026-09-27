@@ -1,31 +1,27 @@
-import { useEffect, useState } from 'react';
+import { VerticalCutReveal } from './ui/vertical-cut-reveal';
 
-/** Contrasting editorial type; motion never changes the accessible heading. */
+/** One accessible greeting, with staggered letter reveals like the supplied reference. */
 export function WelcomeHeading({ ru, reducedMotion }: { ru: boolean; reducedMotion: boolean }) {
-  const [phrase, setPhrase] = useState(0);
-  useEffect(() => {
-    if (reducedMotion) return;
-    const timer = window.setInterval(() => setPhrase((value) => (value + 1) % 3), 5200);
-    return () => window.clearInterval(timer);
-  }, [reducedMotion]);
-  const lines = ru
-    ? ['Место, где идеи обретают форму.', 'Большие планы начинаются с малого.', 'Хорошо, когда мы вместе.']
-    : ['A little space for your next big idea.', 'Big plans begin with small steps.', 'Better things happen together.'];
+  const lines = ru ? ['ДОБРО 👋', 'ПОЖАЛОВАТЬ', '🌤️ В DONE 😊'] : ['WELCOME 👋', '🌤️ TO DONE', 'NICE TO MEET YOU 😊'];
   return (
     <div className="auth-heading-block">
       <h1 className="auth-hero-title" aria-label={ru ? 'Добро пожаловать в Done' : 'Welcome to Done'}>
-        <span>{ru ? 'Добро пожаловать' : 'Welcome'}</span>
-        <br />
-        <span>{ru ? 'в ' : 'to '}</span>
-        <em className="auth-material auth-material-water" data-paused={reducedMotion}>
-          Done.
-        </em>
+        {lines.map((line, index) => (
+          <VerticalCutReveal
+            key={`${ru}-${index}`}
+            splitBy="characters"
+            staggerDuration={0.025}
+            staggerFrom={index === 0 ? 'first' : index === 1 ? 'last' : 'center'}
+            reverse={index === 1}
+            transition={{ type: 'spring', stiffness: 200, damping: 21, delay: index * 0.38 }}
+            reducedMotion={reducedMotion}
+            containerClassName="auth-reveal-line"
+            styleWord={(word) => (word === 'DONE' ? 'auth-material auth-material-water' : '')}
+          >
+            {line}
+          </VerticalCutReveal>
+        ))}
       </h1>
-      <div className="auth-changing-copy" aria-hidden="true">
-        <span key={phrase} data-paused={reducedMotion}>
-          {lines[phrase]}
-        </span>
-      </div>
     </div>
   );
 }

@@ -40,6 +40,25 @@ const ITEM_TYPES = ['initiative', 'epic', 'feature', 'task', 'bug', 'milestone']
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'];
 const SPRINT_STATUSES = ['planned', 'active', 'completed'];
 const NOTIFICATION_LIMIT = 400;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Due date reminders are written by each member's browser for themselves, under
+ * the id nt_<kind>_<task>_<due date>_<member> (see src/lib/reminders.ts), so tabs
+ * and devices agree on it and nobody can take the id of someone else's reminder.
+ */
+const REMINDER_KINDS = ['due', 'overdue'];
+const REMINDER_ID = /^nt_(due|overdue)_/;
+const isReminderId = (id) => REMINDER_ID.test(id);
+const ownReminder = (id, n, user) =>
+  REMINDER_KINDS.includes(n.kind) &&
+  n.recipientId === user.id &&
+  n.actorId === user.id &&
+  n.targetKind === 'item' &&
+  id === `nt_${n.kind}_${n.targetId}_${n.text}_${user.id}`;
+/** Profile photos are small raster images inlined as data URLs. SVG is refused: it can carry scripts. */
+export const PHOTO_MAX_LENGTH = 70000;
+const PHOTO = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+export const isValidPhoto = (value) => value === undefined || (typeof value === 'string' && value.length <= PHOTO_MAX_LENGTH && PHOTO.test(value));
 
 /** Workspaces saved by older versions lack collections added later. */
 export function normalizeState(state) {
@@ -113,8 +132,17 @@ export function validateState(state) {
       throw error(400, 'Invalid sprint');
   }
   for (const n of Object.values(state.notifications)) {
-    if (typeof n.recipientId !== 'string' || typeof n.actorId !== 'string' || typeof n.kind !== 'string' || typeof n.targetId !== 'string')
+    if (
+      typeof n.recipientId !== 'string' ||
+      typeof n.actorId !== 'string' ||
+      typeof n.kind !== 'string' ||
+      typeof n.targetId !== 'string' ||
+      (REMINDER_KINDS.includes(n.kind) && (typeof n.text !== 'string' || !DATE.test(n.text)))
+    )
       throw error(400, 'Invalid notification');
+  }
+  for (const person of Object.values(state.people)) {
+    if (!isValidPhoto(person.photo)) throw error(400, 'Invalid photo');
   }
 }
 
@@ -147,7 +175,9 @@ export function applyChanges(current, changes, user, info = {}) {
         throw error(400, 'Invalid changes');
       if (after && key !== 'maps' && after.id !== id) throw error(400, 'Invalid changes');
       const existing = current[key][id];
-      if (existing && !visible[key][id]) denied();
+      // A reminder of yours stays yours even when its old project is no longer visible, so it can be written again.
+      const ownHiddenReminder = key === 'notifications' && isReminderId(id) && existing?.recipientId === user.id;
+      if (existing && !visible[key][id] && !ownHiddenReminder) denied();
       if (key === 'groups' && !isAdmin(user)) denied();
       if (key === 'people' && !isAdmin(user) && id !== user.id) denied();
       if (key === 'projects' && !existing && after) {
@@ -182,6 +212,9 @@ export function applyChanges(current, changes, user, info = {}) {
         )
           denied();
         if (existing && existing.recipientId !== user.id) denied();
+        // Nobody re-addresses or re-attributes a notification once it exists.
+        if (existing && after && (after.recipientId !== existing.recipientId || after.actorId !== existing.actorId)) denied();
+        if (after && (REMINDER_KINDS.includes(after.kind) || isReminderId(id)) && !ownReminder(id, after, user)) denied();
       }
       applyRecord(next[key], id, { before, after });
       if (key === 'items' && next.items[id] && current.items[id]) {

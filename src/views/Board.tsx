@@ -26,7 +26,8 @@ import { EMPTY_FILTER, filterItems, groupItems, sortItems, type GroupField, type
 import { HORIZON_COLOR, PRIORITY_COLOR, STATUS_META, TYPE_META } from '@/lib/constants';
 import type { ColorName, ID, Item } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { ViewBar, NewButton } from '@/components/ViewBar';
+import { ViewBar } from '@/components/ViewBar';
+import { NewWithTemplates } from '@/components/templates/TemplateMenu';
 import { FilterButton, FilterPills, GroupButton, SearchToggle } from '@/components/QueryControls';
 import { ItemCard } from '@/components/ItemCard';
 import { Avatar, Chip } from '@/components/ui/bits';
@@ -59,7 +60,9 @@ export function BoardView() {
           onChange={(g) => g !== 'none' && set({ group: g, collapsed: g === 'status' ? ['canceled'] : [] })}
         />
         <SearchToggle value={settings.filter.search} onChange={(search) => set({ filter: { ...settings.filter, search } })} />
-        <NewButton onClick={() => openCreateItem({ projectId })}>{t('common.new')}</NewButton>
+        <NewWithTemplates projectId={projectId} onCreate={(templateId) => openCreateItem({ projectId }, templateId)}>
+          {t('common.new')}
+        </NewWithTemplates>
       </ViewBar>
       <FilterPills filter={settings.filter} onChange={(filter) => set({ filter })} />
       <Board projectId={projectId!} settings={settings} onCollapse={(collapsed) => set({ collapsed })} />

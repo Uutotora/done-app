@@ -601,6 +601,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
   const docProject = (id: unknown) => s.docs[id as string]?.projectId;
   const nodeProject = (id: unknown) => s.files[id as string]?.projectId;
   const sprintProject = (id: unknown) => s.sprints[id as string]?.projectId;
+  const templateProject = (id: unknown) => s.templates[id as string]?.projectId;
   const ids = (value: unknown) => (Array.isArray(value) ? (value as string[]) : []);
   const patch = (value: unknown) => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
   const moveTarget = (value: unknown) => (patch(value).projectId as string | undefined) ?? undefined;
@@ -682,6 +683,17 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
     case 'completeSprint':
     case 'deleteSprint':
       return edit(sprintProject(args[0]));
+    // Templates shared by every project need the same rights as workspace pages.
+    case 'createTemplate':
+      return edit(patch(args[0]).projectId as string | undefined);
+    case 'updateTemplate':
+      return edit(templateProject(args[0])) && (!('projectId' in patch(args[1])) || edit(patch(args[1]).projectId as string | undefined));
+    case 'deleteTemplate':
+      return edit(templateProject(args[0]));
+    case 'createItemFromTemplate':
+      return edit(patch(args[1]).projectId as string);
+    case 'saveItemAsTemplate':
+      return edit(itemProject(args[0]));
     default:
       return user.role !== 'viewer';
   }

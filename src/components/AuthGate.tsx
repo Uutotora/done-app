@@ -1,9 +1,8 @@
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Mail, Moon, Sun } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Mail } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { api, bootstrapAuth, dismissSignedOut, enterAccount, enterLocal, useAuth, type AuthUser } from '@/lib/auth';
 import { createEmptyData, useData } from '@/lib/store';
 import { useLang } from '@/lib/i18n';
-import { useIsDark } from '@/lib/hooks';
 import { teamNameFromEmail } from '@/lib/team';
 import type { ColorName, Person } from '@/lib/types';
 import { Logo, Splash } from './Logo';
@@ -62,23 +61,6 @@ function readDraft(): { email?: string; name?: string } {
   } catch {
     return {};
   }
-}
-
-/** Light and dark, right on the sign-in screens: the choice is kept for the app too. */
-function ThemeToggle({ ru }: { ru: boolean }) {
-  const dark = useIsDark();
-  const label = dark ? (ru ? 'Светлая тема' : 'Light theme') : ru ? 'Тёмная тема' : 'Dark theme';
-  return (
-    <button
-      type="button"
-      className="auth-theme"
-      aria-label={label}
-      title={label}
-      onClick={() => useData.getState().setPrefs({ theme: dark ? 'light' : 'dark' })}
-    >
-      {dark ? <Sun size={15} /> : <Moon size={15} />}
-    </button>
-  );
 }
 
 const ROLE_AS: Record<string, [string, string]> = {
@@ -327,9 +309,7 @@ function AuthPage() {
       <div className="auth-glow auth-glow-blue" aria-hidden="true" />
       <div className="auth-glow auth-glow-gold" aria-hidden="true" />
       <Logo size={32} className="auth-brand" />
-      <nav className="auth-language" aria-label={ru ? 'Язык и тема' : 'Language and theme'}>
-        <ThemeToggle ru={ru} />
-        <span className="auth-language-divider" aria-hidden="true" />
+      <nav className="auth-language" aria-label={ru ? 'Язык' : 'Language'}>
         {(['ru', 'en'] as const).map((l) => (
           <button key={l} type="button" aria-pressed={lang === l} onClick={() => useData.getState().setPrefs({ lang: l })}>
             {l.toUpperCase()}

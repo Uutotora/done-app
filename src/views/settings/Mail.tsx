@@ -50,6 +50,7 @@ const PROVIDERS: Provider[] = [
   },
   { id: 'outlook', label: 'Outlook', host: 'smtp.office365.com', port: 587, secure: false, domains: ['outlook.com', 'hotmail.com', 'live.com'] },
 ];
+const GOOGLE_2SV = 'https://myaccount.google.com/signinoptions/twosv';
 const providerFor = (email: string) => PROVIDERS.find((p) => p.domains.includes(email.split('@')[1]?.toLowerCase() ?? ''));
 const isLocal = (url: string) => /^https?:\/\/(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(url);
 
@@ -210,7 +211,8 @@ function ConnectForm({ mail, onDone, onCancel }: { mail: MailSettings; onDone: (
         port: server.port,
         secure: server.secure,
         user: user.trim(),
-        pass,
+        // Google shows app passwords in groups of four; the spaces are not part of it.
+        pass: preset?.id === 'gmail' ? pass.replace(/\s+/g, '') : pass,
         name: name.trim() || 'Done',
         publicUrl: publicUrl.trim(),
       });
@@ -305,21 +307,46 @@ function ConnectForm({ mail, onDone, onCancel }: { mail: MailSettings; onDone: (
         <Field
           label={ru ? 'Пароль приложения' : 'App password'}
           hint={
-            saved && saved.user === user.trim()
-              ? ru
-                ? 'Оставьте пустым, чтобы не менять сохранённый.'
-                : 'Leave empty to keep the saved one.'
-              : preset?.help && (
-                  <a
-                    href={preset.help}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-fg-2"
-                  >
-                    {ru ? `Где взять пароль для ${preset.label}` : `Get an app password for ${preset.label}`}
-                    <ArrowUpRight size={12} />
-                  </a>
-                )
+            saved && saved.user === user.trim() ? (
+              ru ? (
+                'Оставьте пустым, чтобы не менять сохранённый.'
+              ) : (
+                'Leave empty to keep the saved one.'
+              )
+            ) : preset?.id === 'gmail' ? (
+              <span className="flex flex-col gap-0.5">
+                <a
+                  href={GOOGLE_2SV}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-fg-2"
+                >
+                  {ru ? '1. Включите двухэтапную аутентификацию Google' : '1. Turn on Google 2-Step Verification'}
+                  <ArrowUpRight size={12} />
+                </a>
+                <a
+                  href={preset.help}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-fg-2"
+                >
+                  {ru ? '2. Создайте пароль приложения (16 букв) и вставьте сюда' : '2. Create an app password (16 letters) and paste it here'}
+                  <ArrowUpRight size={12} />
+                </a>
+              </span>
+            ) : (
+              preset?.help && (
+                <a
+                  href={preset.help}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-fg-2"
+                >
+                  {ru ? `Где взять пароль для ${preset.label}` : `Get an app password for ${preset.label}`}
+                  <ArrowUpRight size={12} />
+                </a>
+              )
+            )
           }
         >
           <div className="relative">

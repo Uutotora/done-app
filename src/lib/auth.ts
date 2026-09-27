@@ -174,8 +174,9 @@ export function flushWorkspace(): Promise<void> {
       const expected = revision + 1;
       base = snapshot;
       revision = result.revision;
-      // Someone else saved in between: bring their edits in right away.
-      if (result.revision !== expected) await pull();
+      // Someone else saved in between: bring their edits in right away. Forced, because the revision
+      // is already the new one and a plain pull would take the data as current.
+      if (result.revision !== expected) await pull(true, true);
       useAuth.setState({ sync: pendingChanges() ? 'saving' : 'saved', syncError: '' });
     } catch (error) {
       handleSyncError(error);

@@ -143,6 +143,7 @@ function DocView({ doc }: { doc: Doc }) {
             key={doc.id}
             projectId={doc.projectId}
             initial={doc.content}
+            value={doc.content}
             onChange={(blocks) => useData.getState().updateDoc(doc.id, { content: blocks })}
             placeholder={t('docs.bodyPlaceholder')}
             className={cn(doc.smallText && 'small', doc.font === 'serif' && 'serif', doc.font === 'mono' && 'mono')}

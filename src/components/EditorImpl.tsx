@@ -4,10 +4,11 @@ import { BlockNoteView } from '@blocknote/mantine';
 import * as locales from '@blocknote/core/locales';
 import '@blocknote/mantine/style.css';
 import type { PartialBlock } from '@blocknote/core';
-import { useDebouncedCallback, useIsDark } from '@/lib/hooks';
+import { useIsDark } from '@/lib/hooks';
 import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { EditorProps } from './Editor';
+import { useLiveContent } from './editorLive';
 
 const MAX_INLINE_IMAGE = 3 * 1024 * 1024;
 
@@ -20,7 +21,7 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-export default function EditorImpl({ initial, onChange, placeholder, compact, editable = true, className }: EditorProps) {
+export default function EditorImpl({ initial, onChange, placeholder, compact, editable = true, className, value }: EditorProps) {
   const lang = useLang();
   const dark = useIsDark();
   const dictionary = useMemo(() => {
@@ -31,9 +32,10 @@ export default function EditorImpl({ initial, onChange, placeholder, compact, ed
     };
   }, [lang, placeholder]);
 
+  const content = value ?? initial;
   const editor = useCreateBlockNote(
     {
-      initialContent: initial && initial.length ? (initial as PartialBlock[]) : undefined,
+      initialContent: content && content.length ? (content as PartialBlock[]) : undefined,
       dictionary,
       // Images are stored inline so documents stay self-contained in local storage.
       uploadFile: async (file: File) => {
@@ -44,7 +46,8 @@ export default function EditorImpl({ initial, onChange, placeholder, compact, ed
     [dictionary],
   );
 
-  const save = useDebouncedCallback(() => onChange(editor.document as unknown[]), 350);
+  // Saves typing and shows teammates' edits live without remounting the editor.
+  const save = useLiveContent(editor, content, onChange);
 
   return (
     <div className={cn('done-editor -mx-[54px]', compact && 'compact', className)}>

@@ -3,65 +3,47 @@
   inset: 0;
   pointer-events: none;
   user-select: none;
-  color: var(--text, #37352f);
 }
 
-.auth-welcome-paper {
+.auth-welcome-object {
   position: absolute;
-  width: 140px;
-  height: auto;
-  opacity: 0.72;
-  overflow: visible;
+  aspect-ratio: 1;
+  mix-blend-mode: multiply;
 }
 
-.auth-welcome-paper-left {
-  left: calc(50% - 430px);
-  top: clamp(120px, 21%, 240px);
+/* Different scales, heights and tilts frame the welcome without crowding it. */
+.auth-welcome-notebook {
+  width: clamp(170px, 16vw, 232px);
+  left: max(22px, calc(50% - 490px));
+  top: clamp(125px, 24%, 270px);
+  transform: rotate(-12deg);
 }
 
-.auth-welcome-paper-right {
-  right: calc(50% - 430px);
-  top: clamp(190px, 32%, 320px);
-  transform: rotate(15deg);
+.auth-welcome-pencil {
+  width: clamp(154px, 14vw, 206px);
+  right: max(22px, calc(50% - 472px));
+  top: clamp(290px, 53%, 560px);
+  transform: rotate(10deg);
 }
 
-.auth-paper-face {
-  fill: var(--bg, #fff);
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.auth-welcome-frame {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-size: 600% 400%;
+  background-position: 0% 0%;
+  /* Shared 6 × 4 playback sequence, also used by the central illustration. */
+  animation: auth-flipbook 2.4s step-end infinite;
 }
 
-.auth-paper-fold-shade {
-  fill: currentColor;
-  opacity: 0.075;
+.auth-welcome-notebook .auth-welcome-frame {
+  background-image: url('/illustrations/welcome-notebook-24.png');
 }
 
-.auth-paper-fold-lines,
-.auth-paper-spark,
-.auth-paper-trail {
-  stroke: currentColor;
-  stroke-width: 1.15;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.auth-paper-fold-lines {
-  opacity: 0.4;
-}
-
-.auth-paper-spark {
-  opacity: 0.6;
-}
-
-.auth-paper-trail {
-  stroke-dasharray: 1 5;
-  opacity: 0.3;
-}
-
-.auth-paper-still {
-  display: none;
+.auth-welcome-pencil .auth-welcome-frame {
+  background-image: url('/illustrations/welcome-pencil-24.png');
+  animation-duration: 2.8s;
+  animation-delay: -1.4s;
 }
 
 @media (max-width: 980px) {
@@ -71,11 +53,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-paper-motion {
-    display: none;
-  }
-
-  .auth-paper-still {
-    display: inline;
+  .auth-welcome-frame {
+    animation: none;
+    background-position: 0% 0%;
   }
 }

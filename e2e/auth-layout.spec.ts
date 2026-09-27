@@ -7,42 +7,86 @@ test('welcome fits a laptop and a phone, respects reduced motion, and keeps one 
   await expect(page.locator('.auth-reveal-line')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Посмотреть демо' })).toBeInViewport();
   await expect(page.locator('.auth-artwork')).toHaveCSS('width', '240px');
-  await expect(page.locator('.auth-welcome-paper')).toHaveCount(2);
-  const star = page.locator('.auth-welcome-paper-left');
-  await expect(star).toHaveAttribute('data-frame-count', '24');
-  const starBounds = await star.boundingBox();
-  const illustrationBounds = await page.locator('.auth-artwork').boundingBox();
-  expect(starBounds!.x + starBounds!.width).toBeLessThan(illustrationBounds!.x);
+  const objects = page.locator('.auth-welcome-object');
+  const notebook = page.locator('.auth-welcome-notebook .auth-welcome-frame');
+  const pencil = page.locator('.auth-welcome-pencil .auth-welcome-frame');
+  await expect(objects).toHaveCount(2);
+  await expect(notebook).toHaveCSS('background-image', /welcome-notebook-24\.png/);
+  await expect(pencil).toHaveCSS('background-image', /welcome-pencil-24\.png/);
+  await expect(notebook).toHaveCSS('animation-duration', '2.4s');
+  await expect(pencil).toHaveCSS('animation-duration', '2.8s');
+  for (const frame of [notebook, pencil]) {
+    await expect(frame).toHaveAttribute('data-frame-count', '24');
+    await expect(frame).toHaveCSS('background-size', '600% 400%');
+  }
+  async function expectUnobstructedWelcome() {
+    const content = await Promise.all(
+      ['.auth-artwork', '.auth-hero-title', '.auth-email-form'].map((selector) => page.locator(selector).boundingBox()),
+    );
+    for (const object of await objects.all()) {
+      await expect(object).toBeInViewport();
+      const bounds = (await object.boundingBox())!;
+      for (const area of content) {
+        const overlaps =
+          bounds.x < area!.x + area!.width &&
+          bounds.x + bounds.width > area!.x &&
+          bounds.y < area!.y + area!.height &&
+          bounds.y + bounds.height > area!.y;
+        expect(overlaps, 'Decorative drawings must not cover the artwork, heading, or email form').toBe(false);
+      }
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await expectUnobstructedWelcome();
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(star.locator('.auth-paper-motion')).toHaveCSS('display', 'none');
-  await expect(star.locator('.auth-paper-still')).toHaveCSS('display', 'inline');
+  for (const frame of [notebook, pencil]) {
+    await expect(frame).toHaveCSS('animation-name', 'none');
+    await expect(frame).toHaveCSS('background-position', '0% 0%');
+  }
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  for (const frame of [notebook, pencil]) await expect(frame).toHaveCSS('animation-name', 'auth-flipbook');
   await expect(page.getByRole('img', { name: 'Done', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /анимацию|Вода|Солнце|Звёзды/ })).toHaveCount(0);
   await expect(page.locator('.auth-material-water').first()).toBeVisible();
   await expect(page.locator('.auth-flipbook')).toHaveCSS('animation-duration', '2s');
-  // Observe the actual playback, ensuring all 24 sprite cells are displayed.
+  // Observe real playback for all three sheets, not just their declared frame counts.
   const displayedFrames = await page.evaluate(
     () =>
-      new Promise<number>((resolve) => {
-        const element = document.querySelector('.auth-flipbook')!;
-        const positions = new Set<string>();
+      new Promise<number[]>((resolve) => {
+        const elements = [
+          document.querySelector('.auth-flipbook')!,
+          document.querySelector('.auth-welcome-notebook .auth-welcome-frame')!,
+          document.querySelector('.auth-welcome-pencil .auth-welcome-frame')!,
+        ];
+        const positions = elements.map(() => new Set<string>());
         const start = performance.now();
         function sample() {
-          positions.add(getComputedStyle(element).backgroundPosition);
-          if (positions.size === 24 || performance.now() - start > 4500) resolve(positions.size);
+          elements.forEach((element, index) => positions[index].add(getComputedStyle(element).backgroundPosition));
+          const counts = positions.map((frames) => frames.size);
+          if (counts.every((count) => count === 24) || performance.now() - start > 4500) resolve(counts);
           else requestAnimationFrame(sample);
         }
         sample();
       }),
   );
-  expect(displayedFrames).toBe(24);
+  expect(displayedFrames).toEqual([24, 24, 24]);
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 981, height: 720 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expectUnobstructedWelcome();
+  }
+  await page.setViewportSize({ width: 980, height: 720 });
+  for (const object of await objects.all()) await expect(object).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.screenshot({ path: testInfo.outputPath('welcome-laptop.png'), animations: 'disabled' });
   await page.getByRole('button', { name: 'EN', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Big ideas. Clear plans.' })).toBeVisible();
   await page.getByRole('button', { name: 'RU', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const object of await objects.all()) await expect(object).toBeHidden();
   await expect(page.locator('.auth-flipbook')).toHaveCSS('animation-name', 'none');
   await expect(page.locator('.auth-material').first()).toHaveCSS('animation-name', 'none');
   await expect(page.locator('.auth-material').first()).toHaveCSS('transform', 'none');

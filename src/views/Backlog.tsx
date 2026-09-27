@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleDot,
   Compass,
+  Download,
   Flag,
   Gauge,
   GripVertical,
@@ -33,8 +34,9 @@ import { useLang, useT, type TKey } from '@/lib/i18n';
 import { useViewState } from '@/lib/viewState';
 import { useHotkey } from '@/lib/hooks';
 import { useItems } from '@/lib/selectors';
-import { useProjectSprints } from '@/lib/sprints';
+import { sortSprints, useProjectSprints } from '@/lib/sprints';
 import { EMPTY_FILTER, filterItems, groupItems, sortItems, treeRows, type GroupField, type ItemFilter, type ItemSort } from '@/lib/itemQuery';
+import { backlogColumns, pickRows, queryRows } from '@/lib/itemExport';
 import { HORIZON_COLOR, PLANE_GROUP_COLOR, STATUS_META, PRIORITY_COLOR } from '@/lib/constants';
 import { formatScore, riceScore } from '@/lib/rice';
 import { formatRange, todayISO } from '@/lib/dates';
@@ -44,6 +46,7 @@ import type { ID, Item } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ViewBar, NewButton } from '@/components/ViewBar';
 import { FilterButton, FilterPills, GroupButton, PropertiesButton, SearchToggle, SortButton } from '@/components/QueryControls';
+import { csvMenuEntry, downloadItemsCsv, itemExportContext, ViewMoreMenu } from '@/components/ExportMenu';
 import { Avatar, Chip, EmptyState } from '@/components/ui/bits';
 import { ContextMenu, Tooltip } from '@/components/ui/Overlay';
 import {
@@ -135,6 +138,15 @@ export function BacklogView() {
     { key: 'horizon', label: t('prop.horizon'), icon: <Compass size={14} /> },
     { key: 'plane', label: 'Plane', icon: <Hash size={14} /> },
   ];
+  const visibleColumns = columns.filter((c) => !settings.hidden.includes(c.key));
+  const exportCsv = (ids?: ID[]) =>
+    exportBacklog(
+      projectId!,
+      settings,
+      visibleColumns.map((c) => c.key),
+      preset.v === 'all' ? '' : (tabs.find((tab) => tab.value === preset.v)?.label ?? ''),
+      ids,
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -144,12 +156,29 @@ export function BacklogView() {
         <GroupButton group={settings.group} onChange={(group) => set({ group })} />
         <SearchToggle value={settings.filter.search} onChange={(search) => set({ filter: { ...settings.filter, search } })} />
         <PropertiesButton columns={columns} hidden={settings.hidden} onChange={(hidden) => set({ hidden })} />
+        <ViewMoreMenu entries={[csvMenuEntry(() => exportCsv(), t)]} />
         <NewButton onClick={() => openCreateItem({ projectId, ...(preset.v === 'bugs' ? { type: 'bug' } : {}) })}>{t('common.new')}</NewButton>
       </ViewBar>
       <FilterPills filter={settings.filter} onChange={(filter) => set({ filter })} />
-      <BacklogTable projectId={projectId!} settings={settings} columns={columns.filter((c) => !settings.hidden.includes(c.key))} />
+      <BacklogTable projectId={projectId!} settings={settings} columns={visibleColumns} onExport={exportCsv} />
     </div>
   );
+}
+
+/**
+ * Downloads what the view shows: same filters, search, sort and grouping,
+ * sub-items under their parents, visible columns in order. With `ids`, only
+ * those rows (the bulk selection).
+ */
+function exportBacklog(projectId: ID, settings: BacklogSettings, columns: Col[], view: string, ids?: ID[]) {
+  const ctx = itemExportContext();
+  const items = Object.values(ctx.items).filter((i) => i.projectId === projectId);
+  const sprints = sortSprints(Object.values(ctx.sprints).filter((sp) => sp.projectId === projectId));
+  const all = queryRows(items, settings, ctx, sprints);
+  const rows = ids ? pickRows(all, ids, ctx.items) : all;
+  const project = ctx.projects[projectId];
+  const name = [project?.name.trim() || ctx.t('project.untitled'), view].filter(Boolean).join(' · ');
+  downloadItemsCsv(rows, backlogColumns(columns), ctx, name, { withGroup: settings.group !== 'none' });
 }
 
 /* ---------------------------------- Table ---------------------------------- */
@@ -158,10 +187,12 @@ function BacklogTable({
   projectId,
   settings,
   columns,
+  onExport,
 }: {
   projectId: ID;
   settings: BacklogSettings;
   columns: { key: Col; label: string; icon: ReactNode }[];
+  onExport: (ids: ID[]) => void;
 }) {
   const t = useT();
   const items = useItems(projectId);
@@ -364,7 +395,7 @@ function BacklogTable({
           ) : null}
         </DragOverlay>
       </DndContext>
-      <BulkBar selected={[...selected].filter((id) => items.some((i) => i.id === id))} onClear={() => setSelected(new Set())} />
+      <BulkBar selected={[...selected].filter((id) => items.some((i) => i.id === id))} onClear={() => setSelected(new Set())} onExport={onExport} />
     </div>
   );
 }
@@ -864,7 +895,7 @@ function NewRow({
 
 /* --------------------------------- Bulk bar --------------------------------- */
 
-function BulkBar({ selected, onClear }: { selected: ID[]; onClear: () => void }) {
+function BulkBar({ selected, onClear, onExport }: { selected: ID[]; onClear: () => void; onExport: (ids: ID[]) => void }) {
   const t = useT();
   const updateItems = useData((s) => s.updateItems);
   const planeOk = useData((s) => planeReady(s.plane.config));
@@ -877,10 +908,10 @@ function BulkBar({ selected, onClear }: { selected: ID[]; onClear: () => void })
           animate={{ y: 0, opacity: 1, x: '-50%' }}
           exit={{ y: 30, opacity: 0, x: '-50%' }}
           transition={{ type: 'spring', stiffness: 500, damping: 38 }}
-          className="fixed bottom-6 left-1/2 z-40 flex h-11 items-center gap-1 rounded-xl bg-elevated px-2 text-[14px] shadow-lg"
+          className="no-scrollbar fixed bottom-6 left-1/2 z-40 flex h-11 w-max max-w-[calc(100vw-24px)] items-center gap-1 overflow-x-auto rounded-xl bg-elevated px-2 text-[14px] shadow-lg"
         >
-          <span className="px-2 font-medium text-accent">{t('backlog.selected', { n: selected.length })}</span>
-          <span className="h-5 w-px bg-line" />
+          <span className="shrink-0 whitespace-nowrap px-2 font-medium text-accent">{t('backlog.selected', { n: selected.length })}</span>
+          <span className="h-5 w-px shrink-0 bg-line" />
           <StatusPicker value={'backlog'} onChange={(v) => updateItems(selected, { status: v })}>
             <BulkButton icon={<CircleDot size={15} />}>{t('prop.status')}</BulkButton>
           </StatusPicker>
@@ -907,6 +938,15 @@ function BulkBar({ selected, onClear }: { selected: ID[]; onClear: () => void })
               {t('backlog.sendToPlane')}
             </BulkButton>
           )}
+          <Tooltip content={t('backlog.exportSelected', { n: selected.length })}>
+            <BulkButton
+              icon={<Download size={15} />}
+              aria-label={t('backlog.exportSelected', { n: selected.length })}
+              onClick={() => onExport(selected)}
+            >
+              {t('export.short')}
+            </BulkButton>
+          </Tooltip>
           <BulkButton
             icon={<Trash2 size={15} />}
             danger
@@ -917,9 +957,9 @@ function BulkBar({ selected, onClear }: { selected: ID[]; onClear: () => void })
           >
             {t('common.delete')}
           </BulkButton>
-          <span className="h-5 w-px bg-line" />
+          <span className="h-5 w-px shrink-0 bg-line" />
           <Tooltip content={t('backlog.clearSelection')} shortcut="Esc">
-            <button onClick={onClear} className="flex h-8 w-8 items-center justify-center rounded-md text-fg-3 hover:bg-hover">
+            <button onClick={onClear} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-3 hover:bg-hover">
               <X size={16} />
             </button>
           </Tooltip>
@@ -939,7 +979,7 @@ function BulkButton({
     <button
       {...rest}
       className={cn(
-        'flex h-8 items-center gap-1.5 rounded-md px-2 text-fg-2 transition-colors hover:bg-hover disabled:opacity-50',
+        'flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-fg-2 transition-colors hover:bg-hover disabled:opacity-50',
         danger && 'text-[var(--c-red-text)] hover:bg-[var(--c-red-bg)]',
       )}
     >

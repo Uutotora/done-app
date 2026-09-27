@@ -6,6 +6,7 @@ import { ItemDetail } from '@/components/ItemDetail';
 import { EntriesMenu } from '@/components/ui/Overlay';
 import { IconButton } from '@/components/ui/Button';
 import { itemMenuEntries } from '@/components/itemMenu';
+import { itemMarkdownEntry } from '@/components/ExportMenu';
 import { MoreHorizontal } from 'lucide-react';
 import { NotFound } from './NotFound';
 
@@ -16,6 +17,10 @@ export default function ItemPage() {
   const project = useData((s) => (item ? s.projects[item.projectId] : undefined));
   const parent = useData((s) => (item?.parentId ? s.items[item.parentId] : undefined));
   if (!item) return <NotFound />;
+  const entries = itemMenuEntries(item);
+  // Export sits with the other "copy out" actions, just above delete.
+  const at = entries.findIndex((e) => e.key === 's2');
+  entries.splice(at < 0 ? entries.length : at, 0, itemMarkdownEntry(item.id, t));
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Topbar
@@ -27,7 +32,7 @@ export default function ItemPage() {
         actions={
           <EntriesMenu
             align="end"
-            entries={itemMenuEntries(item)}
+            entries={entries}
             trigger={
               <IconButton size="md" label={t('common.more')}>
                 <MoreHorizontal size={17} />

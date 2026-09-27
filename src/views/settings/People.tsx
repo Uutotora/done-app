@@ -1,4 +1,22 @@
-import { Check, Copy, Mail, MoreHorizontal, Plus, Search, ShieldCheck, UserMinus, UserX, UserCheck, FolderLock, RotateCw, X } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  KeyRound,
+  Mail,
+  MailCheck,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Send,
+  ShieldCheck,
+  UserMinus,
+  UserX,
+  UserCheck,
+  FolderLock,
+  RotateCw,
+  X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useLang, useT } from '@/lib/i18n';
 import { useData } from '@/lib/store';
@@ -9,17 +27,20 @@ import { useProjectsList } from '@/lib/selectors';
 import {
   EMAIL_RE,
   canManageMember,
+  createResetLink,
   inviteMailto,
   inviteMembers,
   memberLevel,
   removeMember,
   renewInvite,
   revokeInvite,
+  sendTestMail,
   updateMember,
   useActor,
   useMembers,
   type AccessInput,
   type InviteResult,
+  type MailSettings,
   type Member,
   type PendingInvite,
 } from '@/lib/members';
@@ -41,12 +62,13 @@ export function PeoplePage() {
   const t = useT();
   const actor = useActor();
   const manager = isManager(actor);
-  const { members, invites, loaded, error, remote } = useMembers();
+  const { members, invites, mail, loaded, error, remote } = useMembers();
   const [tab, setTab] = useState<PeopleTab>('members');
   const [query, setQuery] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [resetting, setResetting] = useState<Member | null>(null);
 
   const shown = members.filter((m) => matches(`${m.name} ${m.email ?? ''}`, query));
   const tabs: { key: PeopleTab; label: string; count?: number }[] = [
@@ -128,14 +150,16 @@ export function PeoplePage() {
           remote={remote}
           onEdit={setEditing}
           onRemove={setRemoving}
+          onResetPassword={setResetting}
           onChange={(m, patch, message) => void act(() => updateMember(m, patch), message)}
         />
       )}
-      {tab === 'invites' && <InvitesList invites={invites} act={act} />}
+      {tab === 'invites' && <InvitesList invites={invites} mail={mail} act={act} />}
       {tab === 'projects' && <ProjectsAccess members={members} />}
 
       <InviteDialog open={inviting} onOpenChange={setInviting} />
       {editing && <AccessDialog member={editing} onClose={() => setEditing(null)} />}
+      {resetting && <ResetPasswordDialog member={resetting} mail={mail} onClose={() => setResetting(null)} />}
       <Dialog open={!!removing} onOpenChange={(o) => !o && setRemoving(null)} className="max-w-[420px]" title={t('people.removeFromWorkspace')}>
         {removing && (
           <div className="p-5">
@@ -178,6 +202,7 @@ function MembersTable({
   remote,
   onEdit,
   onRemove,
+  onResetPassword,
   onChange,
 }: {
   members: Member[];
@@ -186,6 +211,7 @@ function MembersTable({
   remote: boolean;
   onEdit: (m: Member) => void;
   onRemove: (m: Member) => void;
+  onResetPassword: (m: Member) => void;
   onChange: (m: Member, patch: Partial<AccessInput> & { suspended?: boolean }, message?: string) => void;
 }) {
   const t = useT();
@@ -305,6 +331,11 @@ function MembersTable({
                     </MenuItem>
                   )}
                   {!admin && <MenuSeparator />}
+                  {remote && !m.suspended && (
+                    <MenuItem icon={<KeyRound size={15} />} onSelect={() => onResetPassword(m)}>
+                      {t('people.resetPassword')}
+                    </MenuItem>
+                  )}
                   <MenuItem
                     icon={m.suspended ? <UserCheck size={15} /> : <UserX size={15} />}
                     onSelect={() => onChange(m, { suspended: !m.suspended })}
@@ -392,6 +423,10 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [error, setError] = useState('');
   const [result, setResult] = useState<InviteResult | null>(null);
   const invalid = emails.filter((e) => !EMAIL_RE.test(e));
+  // With email on the server the invitations went out as letters; links stay as a fallback.
+  const mailed = !!result?.mailed;
+  const emailed = new Set(result?.emailed ?? []);
+  const failedAll = mailed && emailed.size === 0;
 
   const close = (o: boolean) => {
     onOpenChange(o);
@@ -429,18 +464,39 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         <div className="flex max-h-[86vh] flex-col">
           <div className="border-b border-line px-5 py-4">
             <div className="flex items-center gap-2 text-[15px] font-semibold">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--c-green-solid)] text-white">
-                <Check size={13} strokeWidth={3} />
-              </span>
-              {t('invite.doneTitle')}
+              {failedAll ? (
+                <AlertCircle size={20} className="shrink-0 text-[var(--c-red-text)]" />
+              ) : (
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--c-green-solid)] text-white">
+                  <Check size={13} strokeWidth={3} />
+                </span>
+              )}
+              {mailed ? (failedAll ? t('invite.sendFailedTitle') : t('invite.sentTitle')) : t('invite.doneTitle')}
             </div>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-fg-3">{t('invite.doneHint')}</p>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-fg-3">
+              {mailed ? (failedAll ? t('invite.sendFailedHint') : t('invite.sentHint')) : t('invite.doneHint')}
+            </p>
+            {!mailed && <p className="mt-1 text-[12.5px] leading-relaxed text-fg-3">{t('invite.mailHint')}</p>}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
             {result.links.map((link) => (
               <div key={link.email} className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--bg-subtle)]">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px]">{link.email}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[14px]">{link.email}</span>
+                    {mailed &&
+                      (emailed.has(link.email) ? (
+                        <span className="flex shrink-0 items-center gap-1 text-[12px] text-fg-3">
+                          <MailCheck size={12} />
+                          {t('invite.sent')}
+                        </span>
+                      ) : (
+                        <span className="flex shrink-0 items-center gap-1 text-[12px] text-[var(--c-red-text)]">
+                          <AlertCircle size={12} />
+                          {t('invite.notSent')}
+                        </span>
+                      ))}
+                  </div>
                   <input
                     readOnly
                     aria-label={t('invite.linkFor', { email: link.email })}
@@ -449,14 +505,16 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                     className="w-full truncate bg-transparent font-mono text-[11.5px] text-fg-3 outline-none"
                   />
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<Mail size={14} />}
-                  onClick={() => window.open(inviteMailto(link.email, link.url, workspace, lang), '_self')}
-                >
-                  {t('invite.mail')}
-                </Button>
+                {!emailed.has(link.email) && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Mail size={14} />}
+                    onClick={() => window.open(inviteMailto(link.email, link.url, workspace, lang), '_self')}
+                  >
+                    {t('invite.mail')}
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   icon={<Copy size={14} />}
@@ -529,12 +587,39 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
 
 /* --------------------------------- Invites --------------------------------- */
 
-function InvitesList({ invites, act }: { invites: PendingInvite[]; act: (work: () => Promise<unknown>, message?: string) => Promise<void> }) {
+function InvitesList({
+  invites,
+  mail,
+  act,
+}: {
+  invites: PendingInvite[];
+  mail: MailSettings;
+  act: (work: () => Promise<unknown>, message?: string) => Promise<void>;
+}) {
   const t = useT();
   const projects = useData((s) => s.projects);
-  if (!invites.length) return <div className="py-10 text-center text-[13px] text-fg-3">{t('invite.pendingEmpty')}</div>;
+  const [renewing, setRenewing] = useState('');
+  /** A new link for the invitation: emailed when the server sends email, otherwise copied to share by hand. */
+  const renew = async (invite: PendingInvite) => {
+    setRenewing(invite.email);
+    try {
+      const { url, emailed } = await renewInvite(invite);
+      if (!emailed) await navigator.clipboard?.writeText(url).catch(() => undefined);
+      toast(
+        emailed
+          ? { message: t('invite.resent'), tone: 'success' }
+          : { message: mail.configured ? t('invite.resendFailed') : t('invite.renewed'), tone: mail.configured ? 'error' : 'success' },
+      );
+    } catch (e) {
+      toast({ message: (e as Error).message, tone: 'error' });
+    } finally {
+      setRenewing('');
+    }
+  };
   return (
     <div>
+      <MailStatus mail={mail} />
+      {!invites.length && <div className="py-10 text-center text-[13px] text-fg-3">{t('invite.pendingEmpty')}</div>}
       {invites.map((invite) => {
         const days = Math.max(1, Math.ceil((invite.expires - Date.now()) / 86_400_000));
         const admin = invite.role === 'owner' || invite.role === 'admin';
@@ -556,15 +641,11 @@ function InvitesList({ invites, act }: { invites: PendingInvite[]; act: (work: (
             <Button
               size="sm"
               variant="ghost"
-              icon={<RotateCw size={13} />}
-              onClick={() =>
-                void act(async () => {
-                  const url = await renewInvite(invite);
-                  await navigator.clipboard?.writeText(url).catch(() => undefined);
-                }, t('invite.renewed'))
-              }
+              loading={renewing === invite.email}
+              icon={mail.configured ? <Send size={13} /> : <RotateCw size={13} />}
+              onClick={() => void renew(invite)}
             >
-              {t('invite.renew')}
+              {mail.configured ? t('invite.resend') : t('invite.renew')}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => void act(() => revokeInvite(invite.email), t('invite.revoke'))}>
               {t('invite.revoke')}
@@ -573,6 +654,135 @@ function InvitesList({ invites, act }: { invites: PendingInvite[]; act: (work: (
         );
       })}
     </div>
+  );
+}
+
+/** Whether the server sends email, with a way for administrators to check it. */
+function MailStatus({ mail }: { mail: MailSettings }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const test = async () => {
+    setBusy(true);
+    try {
+      const to = await sendTestMail();
+      toast({ message: t('mail.testSent', { email: to }), tone: 'success' });
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      toast({ message: status === 429 ? t('mail.tooMany') : status === 502 ? t('mail.testFailed') : (e as Error).message, tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!mail.configured)
+    return (
+      <Note className="my-3">
+        <span className="font-medium text-fg-2">{t('mail.off')}</span>
+        <br />
+        {t('invite.mailHint')}
+      </Note>
+    );
+  return (
+    <div className="my-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-subtle px-3 py-2">
+      <MailCheck size={15} className="shrink-0 text-fg-3" />
+      <span className="min-w-0 flex-1 truncate text-[13px] text-fg-3">{t('mail.on', { from: mail.from ?? '' })}</span>
+      <Button size="sm" variant="ghost" loading={busy} onClick={() => void test()}>
+        {t('mail.test')}
+      </Button>
+    </div>
+  );
+}
+
+/* ---------------------------- Password reset link ---------------------------- */
+
+/** An administrator's reset link for a member: confirm, then the link is emailed and shown to copy. */
+function ResetPasswordDialog({ member, mail, onClose }: { member: Member; mail: MailSettings; onClose: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ url: string; emailed: boolean } | null>(null);
+  const withMail = mail.configured && !!member.email;
+  const create = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      setResult(await createResetLink(member));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} className="max-w-[460px]" title={result ? t('reset.doneTitle') : t('reset.confirmTitle')}>
+      <div className="p-5">
+        <div className="flex items-center gap-2 text-[15px] font-semibold">
+          {result ? (
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--c-green-solid)] text-white">
+              <Check size={13} strokeWidth={3} />
+            </span>
+          ) : (
+            <KeyRound size={17} className="shrink-0 text-fg-3" />
+          )}
+          {result ? t('reset.doneTitle') : t('reset.confirmTitle')}
+        </div>
+        <div className="mt-3 flex items-center gap-2.5 rounded-md bg-subtle px-2.5 py-2">
+          <Avatar person={member.person} size={26} />
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-medium">{member.name}</div>
+            {member.email && <div className="truncate text-[12.5px] text-fg-3">{member.email}</div>}
+          </div>
+        </div>
+        {result ? (
+          <>
+            <p className="mt-3 text-[14px] leading-relaxed text-fg-2">
+              {result.emailed ? t('reset.emailed', { email: member.email ?? '' }) : withMail ? t('reset.notEmailed') : t('reset.shareLink')}
+            </p>
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5">
+              <input
+                readOnly
+                aria-label={t('reset.linkLabel')}
+                value={result.url}
+                onFocus={(e) => e.target.select()}
+                className="min-w-0 flex-1 truncate bg-transparent font-mono text-[12px] text-fg-2 outline-none"
+              />
+              <Button
+                size="sm"
+                icon={<Copy size={14} />}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(result.url);
+                  toast({ message: t('common.copied') });
+                }}
+              >
+                {t('invite.copy')}
+              </Button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <Button variant="primary" onClick={onClose}>
+                {t('common.done')}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-[14px] leading-relaxed text-fg-2">{withMail ? t('reset.confirmMail') : t('reset.confirmLink')}</p>
+            <p className="mt-2 text-[13px] leading-relaxed text-fg-3">{t('reset.confirmNote')}</p>
+            {error && (
+              <p role="alert" className="mt-3 text-[13px] text-[var(--c-red-text)]">
+                {error}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose}>
+                {t('common.cancel')}
+              </Button>
+              <Button variant="primary" loading={busy} icon={withMail ? <Send size={14} /> : <KeyRound size={14} />} onClick={() => void create()}>
+                {withMail ? t('reset.send') : t('reset.create')}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

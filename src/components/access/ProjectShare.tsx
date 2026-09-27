@@ -17,7 +17,7 @@ import {
   type Member,
 } from '@/lib/members';
 import type { ID } from '@/lib/types';
-import { cn, matches } from '@/lib/utils';
+import { cn, copyText, matches } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Avatar, PageIcon } from '@/components/ui/bits';
 import { Dialog, Popover } from '@/components/ui/Overlay';
@@ -149,7 +149,7 @@ export function ProjectShareDialog({ projectId, open, onOpenChange }: { projectI
             size="sm"
             icon={<Link2 size={14} />}
             onClick={() => {
-              void navigator.clipboard?.writeText(`${window.location.origin}/p/${projectId}/overview`);
+              void copyText(`${window.location.origin}/p/${projectId}/overview`);
               toast({ message: t('common.copied') });
             }}
           >
@@ -258,11 +258,8 @@ function ProjectInviteLink({ projectId }: { projectId: ID }) {
   const copy = async () => {
     const current = link?.enabled && link.url ? link : await change({ enabled: true });
     if (!current?.url) return;
-    try {
-      await navigator.clipboard?.writeText(current.url);
-    } catch {
-      /* the field below still shows the link */
-    }
+    // When copying is refused, the field below still shows the link.
+    if (!(await copyText(current.url))) return;
     setCopied(true);
     toast({ message: t('share.linkCopied'), tone: 'success' });
   };

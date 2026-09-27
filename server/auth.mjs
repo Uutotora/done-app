@@ -781,7 +781,7 @@ export function createAuthApi({
             if (!row) return;
             const { url } = createResetToken(row.id, HOUR);
             audit(row.id, 'password.reset.requested', email);
-            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1, assets: mail.publicUrl }) });
+            await mail.send({ to: email, ...resetEmail({ lang, name: displayName(row), email, link: url, hours: 1 }) });
           });
         return send(res, 200, { ok: true });
       }
@@ -1178,7 +1178,7 @@ export function createAuthApi({
             delivery = await mail.sendAll(
               invites.map((i) => ({
                 to: i.email,
-                ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires, email: i.email, projects, assets: mail.publicUrl }),
+                ...inviteEmail({ lang, workspace, inviter, role, link: i.url, expires, email: i.email, projects }),
               })),
             );
           }
@@ -1236,7 +1236,6 @@ export function createAuthApi({
                 expires,
                 email,
                 projects: invitedProjects(invite.project_ids),
-                assets: mail.publicUrl,
               }),
             }));
           return send(res, 200, { email, token, url, expires, emailed });
@@ -1262,7 +1261,6 @@ export function createAuthApi({
                 link: url,
                 hours: 24,
                 admin: displayName(user),
-                assets: mail.publicUrl,
               }),
             }));
           return send(res, 200, { token, url, expires, emailed });
@@ -1289,7 +1287,7 @@ export function createAuthApi({
           // Settings are saved only once a letter has really gone out with them, to the owner's own address.
           const check = await mail.check(settings, {
             to: user.email,
-            ...testEmail({ lang: langOf(input), link: `${settings.publicUrl}/`, assets: settings.publicUrl }),
+            ...testEmail({ lang: langOf(input), link: `${settings.publicUrl}/` }),
           });
           if (!check.ok) return send(res, 422, { error: 'Could not send a letter with these settings', code: check.code });
           db.prepare("INSERT INTO app_settings(key,value) VALUES('mail',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(
@@ -1303,7 +1301,7 @@ export function createAuthApi({
           const input = await authenticatedBody(req, 4096);
           if (!mail.configured) fail(400, 'Email is not set up on the server');
           if (!mailTests(user.id)) fail(429, 'Too many test emails. Try again in 15 minutes.');
-          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/`, assets: mail.publicUrl }) });
+          const ok = await mail.send({ to: user.email, ...testEmail({ lang: langOf(input), link: `${mail.publicUrl}/` }) });
           if (!ok) fail(502, 'Could not send the email. Check the SMTP settings and the server log.');
           return send(res, 200, { ok: true, to: user.email });
         }

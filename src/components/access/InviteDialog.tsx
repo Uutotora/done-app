@@ -5,10 +5,9 @@ import { useLang, useT } from '@/lib/i18n';
 import { useData } from '@/lib/store';
 import { toast, useUI } from '@/lib/ui';
 import { EMAIL_RE, inviteMailto, inviteMembers, updateJoinLink, useActor, useMembers, type AccessInput, type InviteResult } from '@/lib/members';
-import type { AccessRole } from '@/lib/auth';
-import { cn } from '@/lib/utils';
+import { leaveDemo, type AccessRole } from '@/lib/auth';
+import { cn, copyText } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
-import { Switch } from '@/components/ui/bits';
 import { Dialog } from '@/components/ui/Overlay';
 import { StateIllustration } from '@/components/StatePanel';
 import { AccessEditor, EmailsInput, RoleSelect } from './AccessControls';
@@ -16,9 +15,9 @@ import { AccessEditor, EmailsInput, RoleSelect } from './AccessControls';
 const DEFAULT_ACCESS: AccessInput = { role: 'editor', projectIds: null, projectRoles: {}, canCreateProjects: true };
 const LINK_ROLES: AccessRole[] = ['editor', 'viewer'];
 
-const copy = (text: string, message: string) => {
-  void navigator.clipboard?.writeText(text);
-  toast({ message });
+const copy = async (text: string, message: string) => {
+  // When even the fallback is refused, the link stays visible in the field to copy by hand.
+  if (await copyText(text)) toast({ message });
 };
 
 /**
@@ -104,149 +103,192 @@ function InviteDialogContent({ open, onOpenChange }: { open: boolean; onOpenChan
               <X size={16} />
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-3">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submit();
-              }}
-            >
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-                <div className="min-w-0 flex-1">
-                  <EmailsInput
-                    autoFocus
-                    emails={emails}
-                    onChange={(next) => {
-                      setEmails(next);
-                      setError('');
-                    }}
-                  />
-                </div>
-                <div className="flex shrink-0 items-center gap-2 sm:h-10">
-                  <RoleSelect
-                    value={access.role}
-                    actor={actor}
-                    onChange={(role) => setAccess({ ...access, role, canCreateProjects: role === 'viewer' ? false : access.canCreateProjects })}
-                    className="h-9 border border-line px-2.5"
-                  />
-                  <Button type="submit" variant="primary" size="md" loading={busy} disabled={!emails.length} className="h-9">
-                    {emails.length > 1 ? t('invite.submitN', { n: emails.length }) : t('invite.submit')}
-                  </Button>
-                </div>
-              </div>
-            </form>
-            <button
-              type="button"
-              disabled={admin}
-              aria-expanded={showAccess}
-              onClick={() => setShowAccess((v) => !v)}
-              className="mt-2 flex h-7 items-center gap-1 rounded-md px-1.5 text-[13px] text-fg-3 transition-colors enabled:hover:bg-hover enabled:hover:text-fg-2"
-            >
-              {t('invite.accessEdit')}: <span className="text-fg-2">{scope}</span>
-              {!admin && <ChevronDown size={13} className={cn('transition-transform', showAccess && 'rotate-180')} />}
-            </button>
-            {showAccess && !admin && (
-              <div className="mt-2">
-                <AccessEditor value={access} onChange={setAccess} actor={actor} showRole={false} />
-              </div>
-            )}
-            {remote && !mail.configured && (
-              <p className="mt-2 flex flex-wrap items-center gap-x-1.5 rounded-md bg-subtle px-2.5 py-2 text-[12.5px] text-fg-3">
-                <MailWarning size={13} className="shrink-0" />
-                {t('invite.mailOff')}
+          {remote ? (
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
+              <section aria-labelledby="invite-email-title">
+                <h3 id="invite-email-title" className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-fg-2">
+                  <Mail size={14} />
+                  {t('invite.byEmail')}
+                </h3>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void submit();
+                  }}
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                    <div className="min-w-0 flex-1">
+                      <EmailsInput
+                        autoFocus
+                        emails={emails}
+                        onChange={(next) => {
+                          setEmails(next);
+                          setError('');
+                        }}
+                      />
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 sm:h-10">
+                      <RoleSelect
+                        value={access.role}
+                        actor={actor}
+                        onChange={(role) => setAccess({ ...access, role, canCreateProjects: role === 'viewer' ? false : access.canCreateProjects })}
+                        className="h-9 border border-line px-2.5"
+                      />
+                      <Button type="submit" variant="primary" size="md" loading={busy} disabled={!emails.length} className="h-9">
+                        {emails.length > 1 ? t('invite.submitN', { n: emails.length }) : t('invite.send')}
+                      </Button>
+                    </div>
+                  </div>
+                </form>
                 <button
                   type="button"
-                  onClick={() => {
-                    close(false);
-                    navigate('/settings/mail');
-                  }}
-                  className="font-medium text-fg-2 underline underline-offset-2 hover:text-fg"
+                  disabled={admin}
+                  aria-expanded={showAccess}
+                  onClick={() => setShowAccess((v) => !v)}
+                  className="mt-2 flex h-7 items-center gap-1 rounded-md px-1.5 text-[13px] text-fg-3 transition-colors enabled:hover:bg-hover enabled:hover:text-fg-2"
                 >
-                  {t('invite.mailConnect')}
+                  {t('invite.accessEdit')}: <span className="text-fg-2">{scope}</span>
+                  {!admin && <ChevronDown size={13} className={cn('transition-transform', showAccess && 'rotate-180')} />}
                 </button>
-              </p>
-            )}
-            {error && (
-              <p role="alert" className="mt-3 text-[13px] text-[var(--c-red-text)]">
-                {error}
-              </p>
-            )}
-            {remote && (actor?.role === 'owner' || actor?.role === 'admin') && <JoinLinkSection />}
-          </div>
+                {showAccess && !admin && (
+                  <div className="mt-2">
+                    <AccessEditor value={access} onChange={setAccess} actor={actor} showRole={false} />
+                  </div>
+                )}
+                {!mail.configured && (
+                  <p className="mt-2 flex flex-wrap items-center gap-x-1.5 rounded-md bg-subtle px-2.5 py-2 text-[12.5px] text-fg-3">
+                    <MailWarning size={13} className="shrink-0" />
+                    {t('invite.mailOff')}
+                    {mail.editable !== false && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          close(false);
+                          navigate('/settings/mail');
+                        }}
+                        className="font-medium text-fg-2 underline underline-offset-2 hover:text-fg"
+                      >
+                        {t('invite.mailConnect')}
+                      </button>
+                    )}
+                  </p>
+                )}
+                {error && (
+                  <p role="alert" className="mt-3 text-[13px] text-[var(--c-red-text)]">
+                    {error}
+                  </p>
+                )}
+              </section>
+              {(actor?.role === 'owner' || actor?.role === 'admin') && <JoinLinkSection />}
+            </div>
+          ) : (
+            <DemoNotice onLeave={() => close(false)} />
+          )}
         </div>
       )}
     </Dialog>
   );
 }
 
-/** The team's shareable link: on or off, the role it gives, copy and reset. */
+/** The demo has no server: nobody can be invited, so say so and offer a real account. */
+function DemoNotice({ onLeave }: { onLeave: () => void }) {
+  const t = useT();
+  return (
+    <div className="px-5 pb-6 pt-2 text-center">
+      <StateIllustration scene="team" className="mx-auto mb-3 !w-[190px]" />
+      <div className="text-[15px] font-semibold">{t('invite.demoTitle')}</div>
+      <p className="mx-auto mt-1.5 max-w-[380px] text-[13.5px] leading-relaxed text-fg-3">{t('invite.demoHint')}</p>
+      <Button
+        variant="primary"
+        className="mt-4"
+        onClick={() => {
+          onLeave();
+          void leaveDemo();
+        }}
+      >
+        {t('invite.demoAction')}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The team's shareable link, copy first: the first click creates the link and copies it.
+ * The role it gives, reset and turning it off sit on one quiet line.
+ */
 function JoinLinkSection() {
   const t = useT();
   const actor = useActor();
   const { link } = useMembers();
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   useEffect(() => {
-    if (!confirmReset) return;
-    const timer = setTimeout(() => setConfirmReset(false), 4000);
+    if (!confirmReset && !copied) return;
+    const timer = setTimeout(() => {
+      setConfirmReset(false);
+      setCopied(false);
+    }, 3000);
     return () => clearTimeout(timer);
-  }, [confirmReset]);
+  }, [confirmReset, copied]);
   const change = async (patch: Parameters<typeof updateJoinLink>[0], message?: string) => {
     setBusy(true);
     try {
-      await updateJoinLink(patch);
+      const next = await updateJoinLink(patch);
       if (message) toast({ message, tone: 'success' });
+      return next;
     } catch (e) {
       toast({ message: (e as Error).message, tone: 'error' });
+      return null;
     } finally {
       setBusy(false);
     }
   };
+  const copyLink = async () => {
+    const current = link.enabled && link.url ? link : await change({ enabled: true });
+    if (!current?.url) return;
+    await copy(current.url, t('invite.linkCopied'));
+    setCopied(true);
+  };
   return (
     <section aria-labelledby="invite-link-title" className="mt-5 border-t border-line pt-4">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-subtle text-fg-2">
-          <Link2 size={16} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 id="invite-link-title" className="text-[14px] font-medium">
-            {t('invite.link')}
-          </h3>
-          {link.enabled ? (
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[13px] text-fg-3">
-              {t('invite.linkHint')}
-              <RoleSelect
-                value={link.level as AccessRole}
-                actor={actor}
-                roles={LINK_ROLES}
-                label={t('invite.linkRole')}
-                onChange={(role) => role !== link.level && void change({ level: role as 'editor' | 'viewer' })}
-                className="-ml-1 h-6 px-1.5 text-[13px]"
-              />
-            </div>
-          ) : (
-            <p className="mt-0.5 text-[13px] leading-snug text-fg-3">{t('invite.linkOff')}</p>
-          )}
+      <h3 id="invite-link-title" className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-fg-2">
+        <Link2 size={14} />
+        {t('invite.byLink')}
+      </h3>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 text-[13px] text-fg-3">
+          {t('invite.linkHint')}
+          <RoleSelect
+            value={link.level as AccessRole}
+            actor={actor}
+            roles={LINK_ROLES}
+            label={t('invite.linkRole')}
+            onChange={(role) => role !== link.level && void change({ level: role as 'editor' | 'viewer' })}
+            className="-ml-1 h-6 px-1.5 text-[13px]"
+          />
         </div>
-        <span className={cn('mt-1.5', busy && 'pointer-events-none opacity-60')}>
-          <Switch checked={link.enabled} onChange={(enabled) => void change({ enabled })} label={t('invite.link')} />
-        </span>
+        <Button
+          variant="primary"
+          size="md"
+          loading={busy && !link.enabled}
+          icon={copied ? <Check size={14} /> : <Copy size={14} />}
+          className="h-9 shrink-0"
+          onClick={() => void copyLink()}
+        >
+          {copied ? t('share.linkCopiedShort') : t('invite.linkCopy')}
+        </Button>
       </div>
       {link.enabled && link.url && (
-        <div className="mt-3 pl-11">
-          <div className="flex items-center gap-2">
-            <input
-              readOnly
-              aria-label={t('invite.link')}
-              value={link.url}
-              onFocus={(e) => e.target.select()}
-              className="h-9 min-w-0 flex-1 truncate rounded-md border border-line bg-subtle px-2.5 font-mono text-[12px] text-fg-2 outline-none focus:border-accent"
-            />
-            <Button size="md" icon={<Copy size={14} />} className="h-9 shrink-0" onClick={() => copy(link.url!, t('invite.linkCopied'))}>
-              {t('invite.linkCopy')}
-            </Button>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-fg-3">
+        <>
+          <input
+            readOnly
+            aria-label={t('invite.link')}
+            value={link.url}
+            onFocus={(e) => e.target.select()}
+            className="mt-3 h-8 w-full truncate rounded-md border border-line bg-subtle px-2.5 font-mono text-[11.5px] text-fg-2 outline-none focus:border-accent"
+          />
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-3">
             {link.joined > 0 && <span>{t('invite.linkJoined', { n: link.joined })}</span>}
             <button
               type="button"
@@ -257,16 +299,23 @@ function JoinLinkSection() {
                 void change({ reset: true }, t('invite.linkResetDone'));
               }}
               className={cn(
-                'flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-hover',
+                'flex items-center gap-1 rounded px-1 py-0.5 hover:bg-hover',
                 confirmReset ? 'text-[var(--c-red-text)]' : 'hover:text-fg-2',
-                link.joined > 0 ? '' : '-ml-1',
               )}
             >
-              <RotateCw size={12} />
+              <RotateCw size={11} />
               {confirmReset ? t('invite.linkResetConfirm') : t('invite.linkReset')}
             </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void change({ enabled: false })}
+              className="rounded px-1 py-0.5 hover:bg-hover hover:text-fg-2"
+            >
+              {t('share.linkOff')}
+            </button>
           </div>
-        </div>
+        </>
       )}
     </section>
   );

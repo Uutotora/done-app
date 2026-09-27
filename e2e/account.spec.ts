@@ -104,7 +104,7 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await inviteDialog.getByLabel('Почта', { exact: true }).press('Enter');
   await inviteDialog.getByRole('button', { name: 'Роль', exact: true }).click();
   await page.getByRole('option', { name: /Наблюдатель/ }).click();
-  await inviteDialog.getByRole('button', { name: 'Пригласить', exact: true }).click();
+  await inviteDialog.getByRole('button', { name: 'Отправить', exact: true }).click();
   const invitation = await page.getByLabel('Ссылка приглашения для viewer@example.test').inputValue();
   await page.getByRole('button', { name: 'Готово', exact: true }).click();
   await page.getByRole('tab', { name: /Приглашения/ }).click();
@@ -262,7 +262,8 @@ test('an admin shares the invite link and a teammate joins with it', async ({ br
   // Invite from the sidebar, next to the profile.
   await owner.getByRole('button', { name: 'Пригласить в команду' }).click();
   const dialog = owner.getByRole('dialog', { name: 'Пригласить в команду' });
-  await dialog.getByRole('switch', { name: 'Ссылка-приглашение' }).click();
+  // Copy first: the first click creates the link.
+  await dialog.getByRole('button', { name: 'Копировать ссылку' }).click();
   const field = dialog.getByRole('textbox', { name: 'Ссылка-приглашение' });
   await expect(field).toHaveValue(/\?join=/);
   const link = await field.inputValue();

@@ -50,6 +50,8 @@ function useHydration() {
 
 function useTheme() {
   const theme = useData((s) => s.prefs.theme);
+  // Sign-in, invitation and recovery screens are always light, like Notion's.
+  const signedOut = useAuth((s) => s.mode === 'signedOut');
   const lang = useData((s) => s.prefs.lang);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
@@ -59,7 +61,7 @@ function useTheme() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
   useEffect(() => {
-    const dark = theme === 'dark' || (theme === 'system' && systemDark);
+    const dark = !signedOut && (theme === 'dark' || (theme === 'system' && systemDark));
     document.documentElement.classList.toggle('dark', dark);
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#191919' : '#ffffff');
     try {
@@ -67,7 +69,7 @@ function useTheme() {
     } catch {
       /* ignore */
     }
-  }, [theme, systemDark]);
+  }, [theme, systemDark, signedOut]);
   useEffect(() => {
     document.documentElement.lang = lang;
   }, [lang]);

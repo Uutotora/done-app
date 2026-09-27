@@ -660,6 +660,12 @@ export async function logout() {
   useAuth.setState({ mode: 'signedOut', signedOutReason: completed ? 'logout' : null, user: null, sync: 'saved', error: '' });
 }
 
+/** Leaves the demo for the sign-in screen, to create a real account. The demo stays in this browser. */
+export async function leaveDemo() {
+  await logout();
+  dismissSignedOut();
+}
+
 /**
  * Client-side mirror of the server permissions, so a blocked change is refused
  * right away with a clear message instead of failing when it is saved.

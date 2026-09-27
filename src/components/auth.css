@@ -57,19 +57,6 @@
 .auth-language {
   align-items: center;
 }
-.auth-language .auth-theme {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 26px;
-  padding: 0;
-}
-.auth-language-divider {
-  width: 1px;
-  height: 14px;
-  margin: 0 4px;
-  background: var(--border);
-}
 .auth-stage {
   position: relative;
   flex: 1 0 auto;

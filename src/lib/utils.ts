@@ -120,3 +120,28 @@ export function blocksToText(blocks: unknown[] | undefined, limit = 4000): strin
     .trim()
     .slice(0, limit);
 }
+
+/**
+ * Copies text, also where the Clipboard API is missing or refused (plain http on a LAN address,
+ * a denied permission): falls back to a hidden field and the copy command. Never throws.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+      document.body.appendChild(field);
+      field.select();
+      const ok = document.execCommand('copy');
+      field.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}

@@ -9,6 +9,9 @@
 // Links are only ever built from the configured public URL, never from the request's Host
 // header, so a forged Host cannot turn a reset email into a link to someone else's site.
 // Without a public URL, email is off and admins share links by hand.
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
 
 const SEND_TIMEOUT = 10000;
@@ -313,25 +316,34 @@ const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Helve
 /** A project's emoji for the letter; icon-set ids such as "lucide:rocket" are left out. */
 const emojiIcon = (icon) => (typeof icon === 'string' && icon && icon.length <= 16 && !/^[a-z-]+:/i.test(icon) ? icon : '');
 
+/** Small copies of the logo and the ink illustrations, made for letters (server/email-assets). */
+// Next to this file, or under the working directory when a bundler moved the code (vite.config).
+const EMAIL_ASSETS = [fileURLToPath(new URL('./email-assets/', import.meta.url)), resolve(process.cwd(), 'server/email-assets')];
+const IMAGE_CID = (name) => `${name}@done`;
+/** The images a letter shows, attached inline so mail clients do not have to load them from Done. */
+export function letterImages(art) {
+  return ['done-mark', ...(art ? [art] : [])].flatMap((name) => {
+    const path = EMAIL_ASSETS.map((dir) => join(dir, `${name}.png`)).find((file) => existsSync(file));
+    return path ? [{ filename: `${name}.png`, path, cid: IMAGE_CID(name), contentType: 'image/png' }] : [];
+  });
+}
+
 /**
  * The letter, as a Notion email would look: a small mark, an ink illustration, one clear title,
  * a short line, the details as a quiet table, one button and the raw link. Tables and inline styles
  * keep it intact in Outlook and Gmail; clients that know dark mode get a dark version.
  */
-function layout({ lang, preheader, assets, art, title, paragraphs = [], details = [], button, link, footer }) {
-  const base = assets ? escapeHtml(assets) : '';
+function layout({ lang, preheader, art, title, paragraphs = [], details = [], button, link, footer }) {
   const href = escapeHtml(link);
   const text = 'font-family:' + FONT + ';color:#37352f';
-  const logo = base
-    ? `<img src="${base}/brand/done-mark.png" width="26" height="26" alt="" style="display:block;width:26px;height:26px;border:0">`
-    : `<span style="display:inline-block;width:24px;height:24px;border:2px solid #191919;border-radius:6px;font:700 15px/24px Georgia,serif;text-align:center;color:#191919">D</span>`;
-  const artwork =
-    base && art
-      ? `<tr><td class="done-art" align="center" style="background:#f7f6f3;border-radius:12px;padding:22px 16px 14px">
-<img src="${base}/illustrations/states/${art}.png" width="236" alt="" style="display:block;width:236px;max-width:100%;height:auto;border:0">
+  // Images travel inside the letter (cid:), so they show even when Done runs on a local address.
+  const logo = `<img src="cid:${IMAGE_CID('done-mark')}" width="26" height="26" alt="Done" style="display:block;width:26px;height:26px;border:0">`;
+  const artwork = art
+    ? `<tr><td class="done-art" align="center" style="background:#f7f6f3;border-radius:12px;padding:22px 16px 14px">
+<img src="cid:${IMAGE_CID(art)}" width="236" alt="" style="display:block;width:236px;max-width:100%;height:auto;border:0">
 </td></tr>
 <tr><td style="height:30px;line-height:30px;font-size:0">&nbsp;</td></tr>`
-      : '';
+    : '';
   const rows = details
     .filter(([, value]) => (Array.isArray(value) ? value.length : value))
     .map(
@@ -412,9 +424,8 @@ const plain = (lines) => `${lines.filter((line) => line !== null && line !== und
 
 /**
  * Invitation to join the team. `projects` lists what the invitation opens (null: every project);
- * `assets` is the app's public address for the logo and the illustration.
  */
-export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expires, email, projects = null, assets }) {
+export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expires, email, projects = null }) {
   const ws = oneLine(workspace, 100);
   const who = oneLine(inviter, 100);
   const to = oneLine(email, 254);
@@ -449,7 +460,6 @@ export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expir
       html: layout({
         lang,
         preheader: `${intro} The link works until ${until}.`,
-        assets,
         art: 'team',
         title: subject,
         paragraphs: [intro],
@@ -462,6 +472,7 @@ export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expir
         link,
         footer,
       }),
+      attachments: letterImages('team'),
     };
   }
   const place = ws ? `«${ws}»` : 'Done';
@@ -485,7 +496,6 @@ export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expir
     html: layout({
       lang,
       preheader: `${intro} Ссылка действует до ${until}.`,
-      assets,
       art: 'team',
       title: subject,
       paragraphs: [intro],
@@ -498,11 +508,12 @@ export function inviteEmail({ lang = 'ru', workspace, inviter, role, link, expir
       link,
       footer,
     }),
+    attachments: letterImages('team'),
   };
 }
 
 /** Link to set a new password, requested by the person or created by an administrator. */
-export function resetEmail({ lang = 'ru', name, email, link, hours, admin, assets }) {
+export function resetEmail({ lang = 'ru', name, email, link, hours, admin }) {
   const person = oneLine(name, 100);
   const by = oneLine(admin, 100);
   if (lang === 'en') {
@@ -517,7 +528,6 @@ export function resetEmail({ lang = 'ru', name, email, link, hours, admin, asset
       html: layout({
         lang,
         preheader: intro,
-        assets,
         art: 'letter',
         title: 'Choose a new password',
         paragraphs: [greeting, intro],
@@ -525,6 +535,7 @@ export function resetEmail({ lang = 'ru', name, email, link, hours, admin, asset
         link,
         footer,
       }),
+      attachments: letterImages('letter'),
     };
   }
   const greeting = person ? `Здравствуйте, ${person}!` : 'Здравствуйте!';
@@ -538,7 +549,6 @@ export function resetEmail({ lang = 'ru', name, email, link, hours, admin, asset
     html: layout({
       lang,
       preheader: intro,
-      assets,
       art: 'letter',
       title: 'Новый пароль',
       paragraphs: [greeting, intro],
@@ -546,18 +556,20 @@ export function resetEmail({ lang = 'ru', name, email, link, hours, admin, asset
       link,
       footer,
     }),
+    attachments: letterImages('letter'),
   };
 }
 
 /** The administrator's check that email works. */
-export function testEmail({ lang = 'ru', link, assets }) {
+export function testEmail({ lang = 'ru', link }) {
   if (lang === 'en') {
     const intro = 'If you are reading this, email is set up: invitations and password links will arrive on their own.';
     const footer = 'You received this because an administrator checked the email settings.';
     return {
       subject: 'Email check · Done',
       text: plain(['Email works', '', intro, '', link, '', footer]),
-      html: layout({ lang, preheader: intro, assets, art: 'letter', title: 'Email works', paragraphs: [intro], button: 'Open Done', link, footer }),
+      html: layout({ lang, preheader: intro, art: 'letter', title: 'Email works', paragraphs: [intro], button: 'Open Done', link, footer }),
+      attachments: letterImages('letter'),
     };
   }
   const intro = 'Раз письмо дошло, почта настроена: приглашения и ссылки для смены пароля будут приходить сами.';
@@ -568,7 +580,6 @@ export function testEmail({ lang = 'ru', link, assets }) {
     html: layout({
       lang,
       preheader: intro,
-      assets,
       art: 'letter',
       title: 'Почта работает',
       paragraphs: [intro],
@@ -576,5 +587,6 @@ export function testEmail({ lang = 'ru', link, assets }) {
       link,
       footer,
     }),
+    attachments: letterImages('letter'),
   };
 }

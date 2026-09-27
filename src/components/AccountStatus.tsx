@@ -1,6 +1,6 @@
-import { ChevronDown, CircleHelp, Loader2, LogOut, Moon, Settings, ShieldCheck, Sun } from 'lucide-react';
+import { ChevronDown, CircleHelp, Loader2, LogOut, Moon, Settings, ShieldCheck, Sun, WifiOff } from 'lucide-react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
-import { api, flushWorkspace, isAdmin, logout, refreshWorkspace, useAuth } from '@/lib/auth';
+import { api, flushWorkspace, isAdmin, logout, reconnectWorkspace, refreshWorkspace, useAuth, type SyncStatus } from '@/lib/auth';
 import { useLang, useT } from '@/lib/i18n';
 import { dataSnapshot, useData } from '@/lib/store';
 import { cn, downloadBlob } from '@/lib/utils';
@@ -31,18 +31,12 @@ export function WorkspaceBar() {
   const peers = usePresence((s) => s.peers).filter((p) => p.id !== state.user?.id && people[p.id]);
   const signedIn = state.mode === 'signedIn';
   const onSettings = !!useMatch('/settings/*');
-  const syncLabel =
-    state.sync === 'saved'
-      ? ru
-        ? 'Все изменения сохранены'
-        : 'All changes saved'
-      : state.sync === 'saving'
-        ? ru
-          ? 'Сохранение…'
-          : 'Saving…'
-        : ru
-          ? 'Не удалось сохранить'
-          : 'Could not save';
+  const syncLabels: Record<SyncStatus, string> = {
+    saved: t('sync.allSaved'),
+    saving: t('sync.saving'),
+    offline: t('sync.offline'),
+    error: t('sync.failed'),
+  };
 
   const header = (
     <div className="px-2.5 pb-2 pt-2">
@@ -62,10 +56,10 @@ export function WorkspaceBar() {
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full',
-              state.sync === 'error' ? 'bg-[var(--c-red-solid)]' : live ? 'bg-[var(--c-green-solid)]' : 'bg-fg-4',
+              state.sync === 'error' ? 'bg-[var(--c-red-solid)]' : live && state.sync !== 'offline' ? 'bg-[var(--c-green-solid)]' : 'bg-fg-4',
             )}
           />
-          {syncLabel}
+          {syncLabels[state.sync]}
         </div>
       )}
       {peers.length > 0 && (
@@ -119,6 +113,7 @@ export function WorkspaceBar() {
             <span className="truncate text-[14px] font-semibold text-[var(--sb-text-strong)]">{workspace.name}</span>
             <ChevronDown size={14} className="shrink-0 text-[var(--sb-icon)]" />
             {signedIn && state.sync === 'saving' && <Loader2 size={12} className="shrink-0 animate-spin text-[var(--sb-icon)]" />}
+            {signedIn && state.sync === 'offline' && <WifiOff size={12} aria-label={t('sync.offline')} className="shrink-0 text-[var(--sb-icon)]" />}
             {signedIn && state.sync === 'error' && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--c-red-solid)]" />}
           </button>
         }
@@ -142,14 +137,31 @@ export function WorkspaceBar() {
 }
 export function SyncNotice() {
   const { mode, sync, syncError } = useAuth();
-  const ru = useLang() === 'ru';
+  const t = useT();
   if (mode !== 'signedIn') return null;
+  // Losing the network is not a failure: a calm line, edits keep working and save on their own.
+  if (sync === 'offline')
+    return (
+      <div role="status" className="flex items-center gap-2 border-b border-line bg-subtle px-4 py-1.5 text-[12px] text-fg-2">
+        <WifiOff size={13} className="shrink-0 text-fg-3" aria-hidden />
+        <span className="min-w-0 flex-1 truncate" title={t('sync.offlineNotice')}>
+          {t('sync.offlineNotice')}
+        </span>
+        <button
+          type="button"
+          onClick={() => void reconnectWorkspace()}
+          className="shrink-0 rounded px-1.5 py-0.5 font-medium text-fg-2 transition-colors hover:bg-hover hover:text-fg"
+        >
+          {t('sync.retry')}
+        </button>
+      </div>
+    );
   if (sync === 'error')
     return (
       <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-[var(--c-orange-bg)] px-4 py-2 text-[12px]">
-        <span className="flex-1">
-          {ru ? 'Не удалось сохранить изменения: ' : 'Could not save changes: '}
-          {syncError}
+        <span className="min-w-0 flex-1">
+          <span className="font-medium">{t('sync.errorTitle')}</span>
+          {syncError && <span className="text-fg-2">: {syncError}</span>}
         </span>
         <Button
           size="xs"
@@ -160,25 +172,18 @@ export function SyncNotice() {
             downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'done-unsaved.json');
           }}
         >
-          {ru ? 'Скачать изменения' : 'Download changes'}
+          {t('sync.download')}
         </Button>
         <Button size="xs" onClick={() => void flushWorkspace()}>
-          {ru ? 'Повторить' : 'Retry'}
+          {t('sync.retry')}
         </Button>
         <Button
           size="xs"
           onClick={() => {
-            if (
-              window.confirm(
-                ru
-                  ? 'Загрузить серверную версию? Несохранённые изменения будут заменены. Сначала скачайте их.'
-                  : 'Load the server version? Unsaved changes will be replaced. Download them first.',
-              )
-            )
-              void refreshWorkspace(true).catch((e) => toast({ message: e.message, tone: 'error' }));
+            if (window.confirm(t('sync.loadServerConfirm'))) void refreshWorkspace(true).catch((e) => toast({ message: e.message, tone: 'error' }));
           }}
         >
-          {ru ? 'Загрузить версию сервера' : 'Load server version'}
+          {t('sync.loadServer')}
         </Button>
       </div>
     );

@@ -157,7 +157,8 @@ export function AccessEditor({
   actor: { role: AccessRole } | null;
 }) {
   const t = useT();
-  const projects = useProjectsList();
+  // Archived projects keep their access, so they are listed here too.
+  const projects = useProjectsList({ includeArchived: true });
   const admin = value.role === 'owner' || value.role === 'admin';
   const baseLabel = value.role === 'viewer' ? t('level.viewer') : t('level.editor');
   const setLevel = (id: string, level: ProjectLevel | undefined) => {
@@ -234,6 +235,7 @@ export function AccessEditor({
                     )}
                     <PageIcon icon={p.icon} size={16} />
                     <span className={cn('min-w-0 flex-1 truncate text-[13.5px]', !selected && 'text-fg-3')}>{p.name || t('project.untitled')}</span>
+                    {p.archived && <span className="shrink-0 text-[12px] text-fg-4">{t('archive.badge')}</span>}
                     {selected && (
                       <LevelSelect
                         value={value.projectRoles[p.id]}

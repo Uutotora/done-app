@@ -79,7 +79,9 @@ export interface Project {
   plane?: PlaneProjectLink;
   groupId?: ID;
   order: number;
+  /** Hidden from the sidebar, My tasks and reports, but kept with all its work and access. */
   archived?: boolean;
+  archivedAt?: ISODateTime;
   /** Who created the project; creators may delete it without being admins. */
   createdBy?: ID;
   createdAt: ISODateTime;

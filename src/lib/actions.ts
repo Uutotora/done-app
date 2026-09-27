@@ -47,6 +47,32 @@ export function deleteProjectWithUndo(id: ID) {
   trashWithUndo('project', p.name, p.icon, s.deleteProject(id), 'project.deleted');
 }
 
+/** Sends a project to the archive and offers an immediate undo. */
+export function archiveProjectWithUndo(id: ID) {
+  const s = useData.getState();
+  const p = s.projects[id];
+  if (!p || p.archived) return;
+  s.setProjectArchived(id, true);
+  // The mutation policy may refuse it (it explains why in its own toast).
+  if (!useData.getState().projects[id]?.archived) return;
+  const lang = s.prefs.lang;
+  toast({
+    message: translate(lang, 'archive.archived', { name: p.name || translate(lang, 'project.untitled') }),
+    action: { label: translate(lang, 'common.undo'), run: () => useData.getState().setProjectArchived(id, false) },
+  });
+}
+
+/** Brings an archived project back to the sidebar, My tasks and reports. */
+export function restoreArchivedProject(id: ID) {
+  const s = useData.getState();
+  const p = s.projects[id];
+  if (!p?.archived) return;
+  s.setProjectArchived(id, false);
+  if (useData.getState().projects[id]?.archived) return;
+  const lang = s.prefs.lang;
+  toast({ message: translate(lang, 'archive.restored', { name: p.name || translate(lang, 'project.untitled') }), tone: 'success' });
+}
+
 export function deleteGroupWithUndo(id: ID) {
   const s = useData.getState();
   const g = s.groups[id];

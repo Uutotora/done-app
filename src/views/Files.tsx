@@ -504,6 +504,7 @@ function useMoveTargets(nodeIds: ID[]): MenuEntry[] {
   const t = useT();
   const files = useData((s) => s.files);
   const projects = useProjectsList();
+  const projectsById = useData((s) => s.projects);
   const moveNodes = useData((s) => s.moveNodes);
   const first = files[nodeIds[0]];
   if (!first) return [];
@@ -531,7 +532,8 @@ function useMoveTargets(nodeIds: ID[]): MenuEntry[] {
     {
       key: 'root',
       icon: <FolderGlyph size={15} color="gray" />,
-      label: projectId ? (projects.find((p) => p.id === projectId)?.name ?? '') : t('files.workspaceDrive'),
+      // The current drive by id: an archived project's drive keeps its name here.
+      label: projectId ? (projectsById[projectId]?.name ?? '') : t('files.workspaceDrive'),
       checked: nodeIds.every((id) => !files[id]?.parentId),
       onSelect: () => moveNodes(nodeIds, undefined, projectId),
     },

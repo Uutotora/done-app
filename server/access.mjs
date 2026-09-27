@@ -156,6 +156,9 @@ export function canSeeRecord(state, user, key, id, groups) {
       return entity.recipientId === user.id && (!entity.projectId || canSeeRecord(state, user, 'projects', entity.projectId));
     case 'people':
       return true;
+    // Workspace-wide templates (no projectId) need access to every project, like creating one does.
+    case 'templates':
+      return canReadProject(user, entity.projectId);
     default:
       // Collections without a rule of their own follow their project, if they have one.
       return entity.projectId === undefined || canReadProject(user, entity.projectId);

@@ -1,10 +1,21 @@
-import { Link2, Plus, Search } from 'lucide-react';
+import { Check, Copy, Link2, Plus, RotateCw, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, useAuth, type AccessLevel, type AccessRole, type ProjectLevel } from '@/lib/auth';
 import { useT } from '@/lib/i18n';
 import { useData } from '@/lib/store';
 import { toast } from '@/lib/ui';
-import { canManageMember, memberLevel, setProjectLevel, useActor, useMembers, type Member } from '@/lib/members';
+import {
+  NO_LINK,
+  canManageMember,
+  getProjectJoinLink,
+  memberLevel,
+  setProjectLevel,
+  updateProjectJoinLink,
+  useActor,
+  useMembers,
+  type JoinLink,
+  type Member,
+} from '@/lib/members';
 import type { ID } from '@/lib/types';
 import { cn, matches } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
@@ -61,6 +72,7 @@ export function ProjectShareDialog({ projectId, open, onOpenChange }: { projectI
   const project = useData((s) => s.projects[projectId]);
   const people = useData((s) => s.people);
   const actor = useActor();
+  const signedIn = useAuth((s) => s.mode === 'signedIn');
   const { list, members, refresh } = useProjectAccess(projectId, open);
   const manager = actor?.role === 'owner' || actor?.role === 'admin';
   const [busy, setBusy] = useState<ID | null>(null);
@@ -130,6 +142,7 @@ export function ProjectShareDialog({ projectId, open, onOpenChange }: { projectI
             );
           })}
         </div>
+        {manager && signedIn && <ProjectInviteLink projectId={projectId} />}
         <div className="flex items-center gap-3 border-t border-line px-5 py-3">
           <span className="min-w-0 flex-1 text-[12.5px] leading-snug text-fg-3">{manager ? t('share.admins') : t('share.onlyAdmins')}</span>
           <Button
@@ -197,5 +210,128 @@ function AddMember({ candidates, onPick }: { candidates: Member[]; onPick: (m: M
         </div>
       </div>
     </Popover>
+  );
+}
+
+/**
+ * "Invite with a link", as in Notion and Figma: copy the link and send it to anyone. Whoever opens it
+ * creates an account (or signs in) and lands in this project with the chosen level.
+ */
+function ProjectInviteLink({ projectId }: { projectId: ID }) {
+  const t = useT();
+  const [link, setLink] = useState<JoinLink | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getProjectJoinLink(projectId)
+      .then((l) => alive && setLink(l))
+      .catch(() => alive && setLink(NO_LINK));
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
+  useEffect(() => {
+    if (!copied && !confirmReset) return;
+    const timer = setTimeout(() => {
+      setCopied(false);
+      setConfirmReset(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [copied, confirmReset]);
+  const change = async (patch: Parameters<typeof updateProjectJoinLink>[1], message?: string) => {
+    setBusy(true);
+    try {
+      const next = await updateProjectJoinLink(projectId, patch);
+      setLink(next);
+      if (message) toast({ message, tone: 'success' });
+      return next;
+    } catch (e) {
+      toast({ message: (e as Error).message, tone: 'error' });
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  // The first copy creates the link (or turns it back on); after that it only copies.
+  const copy = async () => {
+    const current = link?.enabled && link.url ? link : await change({ enabled: true });
+    if (!current?.url) return;
+    try {
+      await navigator.clipboard?.writeText(current.url);
+    } catch {
+      /* the field below still shows the link */
+    }
+    setCopied(true);
+    toast({ message: t('share.linkCopied'), tone: 'success' });
+  };
+  const level = (link?.level ?? 'editor') as ProjectLevel;
+  return (
+    <section aria-labelledby="project-link-title" className="border-t border-line px-5 py-4">
+      <div className="flex items-center gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-subtle text-fg-2">
+          <Link2 size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 id="project-link-title" className="text-[14px] font-medium">
+            {t('share.inviteLink')}
+          </h3>
+          <div className="flex flex-wrap items-center gap-x-1 text-[12.5px] text-fg-3">
+            {t('share.inviteLinkHint')}
+            <LevelSelect value={level} onChange={(next) => next && next !== level && void change({ level: next })} />
+          </div>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          loading={busy && !link?.enabled}
+          disabled={!link}
+          icon={copied ? <Check size={14} /> : <Copy size={14} />}
+          onClick={() => void copy()}
+          className="shrink-0"
+        >
+          {copied ? t('share.linkCopiedShort') : t('share.copyInvite')}
+        </Button>
+      </div>
+      {link?.enabled && link.url && (
+        <div className="mt-3 pl-11">
+          <input
+            readOnly
+            aria-label={t('share.inviteLink')}
+            value={link.url}
+            onFocus={(e) => e.target.select()}
+            className="h-8 w-full truncate rounded-md border border-line bg-subtle px-2.5 font-mono text-[11.5px] text-fg-2 outline-none focus:border-accent"
+          />
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-3">
+            {link.joined > 0 && <span>{t('invite.linkJoined', { n: link.joined })}</span>}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                if (!confirmReset) return setConfirmReset(true);
+                setConfirmReset(false);
+                void change({ reset: true }, t('invite.linkResetDone'));
+              }}
+              className={cn(
+                'flex items-center gap-1 rounded px-1 py-0.5 hover:bg-hover',
+                confirmReset ? 'text-[var(--c-red-text)]' : 'hover:text-fg-2',
+              )}
+            >
+              <RotateCw size={11} />
+              {confirmReset ? t('invite.linkResetConfirm') : t('invite.linkReset')}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void change({ enabled: false })}
+              className="rounded px-1 py-0.5 hover:bg-hover hover:text-fg-2"
+            >
+              {t('share.linkOff')}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

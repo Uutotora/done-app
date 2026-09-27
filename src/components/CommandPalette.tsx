@@ -18,6 +18,7 @@ import {
   FileText,
   Inbox,
   IterationCw,
+  UserPlus,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -29,7 +30,7 @@ import { blocksToText, matches, modKey } from '@/lib/utils';
 import { PageIcon, Kbd } from './ui/bits';
 import { StatusIcon, TypeIcon } from './pickers/icons';
 import { NodeIcon } from './files/NodeIcon';
-import { canCreateProjects } from '@/lib/auth';
+import { canCreateProjects, isAdmin, useAuth } from '@/lib/auth';
 import { isArchivedProject, refInArchive } from '@/lib/archive';
 import { openProjectArchive } from './ProjectArchive';
 
@@ -50,6 +51,7 @@ export function CommandPalette() {
   const createDoc = useData((s) => s.createDoc);
   const ui = useUI();
   const isDark = useIsDark();
+  const canInvite = useAuth((a) => a.mode === 'local' || isAdmin(a.user));
 
   const run = (fn: () => void) => {
     setOpen(false);
@@ -275,6 +277,7 @@ export function CommandPalette() {
                       sc: `${modKey()}\\`,
                       fn: () => setPrefs({ sidebarCollapsed: !useData.getState().prefs.sidebarCollapsed }),
                     },
+                    ...(canInvite ? [{ k: 'invite', icon: <UserPlus size={16} />, label: t('profile.invite'), fn: () => ui.setInvite(true) }] : []),
                     { k: 'archive', icon: <Archive size={16} />, label: t('archive.title'), fn: openProjectArchive },
                     { k: 'shortcuts', icon: <Keyboard size={16} />, label: t('cmd.shortcuts'), sc: '?', fn: () => ui.setShortcuts(true) },
                   ].filter((a) => !q || matches(a.label, q));

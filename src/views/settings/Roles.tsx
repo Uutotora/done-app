@@ -106,15 +106,24 @@ interface AuditEvent {
 
 const AUDIT_ACTIONS = new Set([
   'account.created',
+  'account.joined',
   'account.login',
   'password.changed',
   'invite.created',
+  'invite.renewed',
   'invite.revoked',
+  'invite.link.enabled',
+  'invite.link.disabled',
+  'invite.link.reset',
+  'invite.link.role',
   'member.updated',
   'member.suspended',
   'member.restored',
   'member.removed',
   'project.access',
+  'project.joined',
+  'mail.updated',
+  'mail.removed',
   'project.created',
   'project.deleted',
   'project.renamed',
@@ -197,7 +206,9 @@ export function AuditPage() {
             ? t(levelLabel(part as never))
             : part === 'removed'
               ? t('level.none')
-              : part,
+              : part === 'team'
+                ? t('audit.teamLink')
+                : part,
       )
       .join(' · ');
   const label = (action: string) => {

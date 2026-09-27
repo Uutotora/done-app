@@ -54,6 +54,22 @@
   color: var(--text);
   background: var(--bg-hover);
 }
+.auth-language {
+  align-items: center;
+}
+.auth-language .auth-theme {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+}
+.auth-language-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--border);
+}
 .auth-stage {
   position: relative;
   flex: 1 0 auto;
@@ -211,16 +227,6 @@
   color: var(--text);
   background: var(--bg-hover);
 }
-.auth-footer {
-  flex-shrink: 0;
-  padding: 0 20px 24px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-3);
-}
-.auth-footer span {
-  margin-inline: 9px;
-}
 .auth-card {
   width: 100%;
   max-width: 380px;
@@ -278,20 +284,6 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.auth-invite-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-3);
-  margin-bottom: 12px;
-}
-.auth-role {
-  font-size: 10px;
-  padding: 2px 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
 .auth-details {
   display: flex;
   flex-direction: column;
@@ -341,6 +333,47 @@
   margin-top: 8px;
   color: var(--text-3);
   font-size: 11px;
+  transition: color 160ms;
+}
+.auth-password-help[data-ok] {
+  color: var(--c-green-text);
+}
+.auth-inline-link {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-inline-link:hover {
+  color: var(--text);
+}
+.auth-caption-center {
+  text-align: center;
+}
+.auth-invite-header {
+  margin-bottom: 24px;
+}
+.auth-invite-header h1 {
+  text-wrap: balance;
+}
+.auth-invite-project {
+  display: flex;
+  width: 52px;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+.auth-invite-from {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-2);
 }
 .auth-error {
   color: var(--c-red-text);
@@ -540,9 +573,6 @@
   .auth-demo {
     margin-top: 16px;
   }
-  .auth-footer {
-    padding-bottom: 16px;
-  }
 }
 
 /* Illustrated account states share the same ink artwork as the workspace. */
@@ -572,12 +602,6 @@
 .auth-recovery-card {
   max-width: 380px;
 }
-.auth-story-copy {
-  display: none;
-}
-.auth-join-card .auth-invite-badge {
-  margin-bottom: 16px;
-}
 .auth-join-card .auth-identity {
   flex-wrap: wrap;
   overflow-wrap: anywhere;
@@ -588,34 +612,15 @@
 @media (min-width: 900px) {
   .auth-stage-invitation {
     flex-direction: row;
-    gap: clamp(60px, 8vw, 120px);
-    padding: 100px 48px 60px;
+    gap: clamp(56px, 7vw, 112px);
+    padding: 90px 48px 60px;
   }
   .auth-invitation-story {
-    width: 360px;
+    width: clamp(320px, 30vw, 420px);
     margin: 0;
-    text-align: center;
-  }
-  .auth-story-copy {
-    display: block;
-    margin-top: 34px;
-  }
-  .auth-story-copy h2 {
-    font-size: 30px;
-    font-weight: 600;
-    line-height: 1.2;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-  }
-  .auth-story-copy > p:last-child {
-    max-width: 300px;
-    margin: 16px auto 0;
-    font-size: 14px;
-    line-height: 1.7;
-    color: var(--text-2);
   }
   .auth-join-card {
-    max-width: 390px;
+    max-width: 380px;
   }
 }
 @media (max-width: 899px) {

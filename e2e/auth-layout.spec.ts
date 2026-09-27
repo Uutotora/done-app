@@ -57,10 +57,15 @@ test('welcome fits a laptop and a phone, respects reduced motion, and keeps one 
   expect(visibleLetters).toBe(true);
   await expect(page.getByRole('button', { name: 'Включить анимацию' })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(page.getByRole('button', { name: 'Продолжить с почтой' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Продолжить', exact: true })).toBeInViewport();
+  // Light and dark sit next to the language switch, before signing in.
+  await page.getByRole('button', { name: 'Тёмная тема', exact: true }).click();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await page.getByRole('button', { name: 'Светлая тема', exact: true }).click();
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
   await page.screenshot({ path: testInfo.outputPath('welcome-mobile.png'), animations: 'disabled' });
   await page.goto('/?invite=expired-test-link&email=wrong@example.test');
-  await expect(page.getByRole('heading', { name: 'Эта ссылка уже не действует' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ссылка больше не работает' })).toBeVisible();
   await expect(page.getByLabel('Придумайте пароль')).toHaveCount(0);
   await expect(page.locator('.auth-state-art .state-illustration')).toBeVisible();
   const decorationBounds = await page.locator('.auth-state-art').boundingBox();

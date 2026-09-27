@@ -8,6 +8,7 @@ import {
   Download,
   History,
   ImageUp,
+  Mail,
   Monitor,
   Moon,
   RefreshCw,
@@ -37,7 +38,6 @@ import { Topbar } from '@/components/Topbar';
 import { Button, Spinner } from '@/components/ui/Button';
 import { Avatar, Field, PageIcon, Segmented, Switch, TextInput } from '@/components/ui/bits';
 import { Dialog, Popover } from '@/components/ui/Overlay';
-import { IconPicker } from '@/components/pickers/IconPicker';
 import { AvatarPicker } from '@/components/pickers/AvatarPicker';
 import { OptionList } from '@/components/pickers/OptionList';
 import { PasswordSettings } from '@/components/AccountStatus';
@@ -46,9 +46,10 @@ import { useAuth } from '@/lib/auth';
 import { PlaneLogo } from '@/components/PlanePanel';
 import { ColorDots, H, Note, Row } from './settings/common';
 import { PeoplePage } from './settings/People';
+import { MailPage } from './settings/Mail';
 import { AuditPage, RolesPage } from './settings/Roles';
 
-type Page = 'account' | 'preferences' | 'general' | 'people' | 'roles' | 'audit' | 'data' | 'plane';
+type Page = 'account' | 'preferences' | 'general' | 'people' | 'mail' | 'roles' | 'audit' | 'data' | 'plane';
 interface NavEntry {
   key: Page;
   label: TKey;
@@ -79,6 +80,7 @@ export default function Settings() {
       items: [
         { key: 'general', label: 'set.nav.general', icon: <Building2 size={16} /> },
         { key: 'people', label: 'set.nav.people', icon: <Users size={16} /> },
+        ...(remote && manager ? [{ key: 'mail' as const, label: 'set.nav.mail' as const, icon: <Mail size={16} /> }] : []),
         { key: 'roles', label: 'set.nav.roles', icon: <ShieldCheck size={16} /> },
         ...(remote && manager ? [{ key: 'audit' as const, label: 'set.nav.audit' as const, icon: <History size={16} /> }] : []),
         ...(manager ? [{ key: 'data' as const, label: 'set.nav.data' as const, icon: <Database size={16} /> }] : []),
@@ -140,6 +142,7 @@ export default function Settings() {
             {active === 'preferences' && <Preferences />}
             {active === 'general' && <General editable={manager || !remote} />}
             {active === 'people' && <PeoplePage />}
+            {active === 'mail' && <MailPage />}
             {active === 'roles' && <RolesPage />}
             {active === 'audit' && <AuditPage />}
             {active === 'plane' && <PlaneTab />}
@@ -399,31 +402,16 @@ function General({ editable }: { editable: boolean }) {
     <>
       <H>{t('set.nav.general')}</H>
       {!editable && <Note className="mb-5">{t('general.readOnly')}</Note>}
-      <div className="flex items-end gap-4">
-        {editable ? (
-          <IconPicker value={ws.icon} onChange={(v) => update({ icon: v ?? '🚀' })} allowRemove={false}>
-            <button
-              aria-label={t('settings.workspaceIcon')}
-              className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-line-strong hover:bg-hover"
-            >
-              <PageIcon icon={ws.icon} size={36} />
-            </button>
-          </IconPicker>
-        ) : (
-          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-line">
-            <PageIcon icon={ws.icon} size={36} />
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <Field label={t('settings.workspaceName')}>
-            <TextInput
-              key={ws.name}
-              disabled={!editable}
-              defaultValue={ws.name}
-              onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== ws.name && update({ name: e.target.value.trim() })}
-            />
-          </Field>
-        </div>
+      <div className="max-w-[420px]">
+        <Field label={t('settings.workspaceName')} hint={t('settings.workspaceNameHint')}>
+          <TextInput
+            key={ws.name}
+            disabled={!editable}
+            defaultValue={ws.name}
+            placeholder="Acme"
+            onBlur={(e) => e.target.value.trim() !== ws.name && update({ name: e.target.value.trim() })}
+          />
+        </Field>
       </div>
     </>
   );
@@ -609,8 +597,10 @@ function DataTab() {
       replaceAll(data);
       void Promise.all(blobs.map(([id, blob]) => putFileBlob(id, blob)));
     } else if (confirm === 'reset') {
+      // A clean page keeps the people, the team and your preferences; only the work goes.
+      const current = useData.getState();
       const fresh = createEmptyData(lang);
-      replaceAll(fresh);
+      replaceAll({ ...fresh, onboarded: true, meId: current.meId, people: current.people, workspace: current.workspace, prefs: current.prefs });
     }
     setConfirm(null);
     navigate('/');

@@ -21,7 +21,6 @@ function PageError({ onRetry }: { onRetry: () => void }) {
       <StatePanel
         page
         illustration="lost"
-        eyebrow={ru ? 'Небольшая заминка' : 'A little hiccup'}
         title={ru ? 'Не удалось открыть страницу' : 'This page couldn’t open'}
         action={
           <>
@@ -36,9 +35,7 @@ function PageError({ onRetry }: { onRetry: () => void }) {
           </>
         }
       >
-        {ru
-          ? 'Попробуйте ещё раз. Если ошибка повторится, обновите страницу или вернитесь на главную.'
-          : 'Give it another try. If the problem continues, refresh the page or go back home.'}
+        {ru ? 'Попробуйте ещё раз — обычно это помогает.' : 'Give it another try — that usually helps.'}
       </StatePanel>
     </div>
   );

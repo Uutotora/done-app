@@ -18,12 +18,17 @@ export function RoleSelect({
   actor,
   disabled,
   className,
+  roles = ROLE_ORDER,
+  label,
 }: {
   value: AccessRole;
   onChange: (role: AccessRole) => void;
   actor: { role: AccessRole } | null;
   disabled?: boolean;
   className?: string;
+  /** Roles to offer, e.g. only editor and viewer for the invite link. */
+  roles?: AccessRole[];
+  label?: string;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -35,7 +40,7 @@ export function RoleSelect({
       align="start"
       trigger={
         <button
-          aria-label={t('people.col.role')}
+          aria-label={label ?? t('people.col.role')}
           className={cn(
             'flex h-7 max-w-full items-center gap-1 rounded-md px-2 text-[13.5px] text-fg-2 transition-colors hover:bg-hover data-[state=open]:bg-hover',
             className,
@@ -47,7 +52,7 @@ export function RoleSelect({
       }
     >
       <div role="listbox" className="w-[300px] p-1">
-        {ROLE_ORDER.map((role) => {
+        {roles.map((role) => {
           const allowed = canAssignRole(actor, role);
           return (
             <button
@@ -151,10 +156,13 @@ export function AccessEditor({
   value,
   onChange,
   actor,
+  showRole = true,
 }: {
   value: AccessInput;
   onChange: (v: AccessInput) => void;
   actor: { role: AccessRole } | null;
+  /** The invite dialog picks the role next to the addresses, so it hides the role cards here. */
+  showRole?: boolean;
 }) {
   const t = useT();
   // Archived projects keep their access, so they are listed here too.
@@ -169,30 +177,32 @@ export function AccessEditor({
   };
   return (
     <div className="space-y-5">
-      <Block label={t('invite.role')}>
-        <div role="radiogroup" className="grid gap-1.5 sm:grid-cols-2">
-          {ROLE_ORDER.map((role) => {
-            const allowed = canAssignRole(actor, role);
-            return (
-              <button
-                key={role}
-                type="button"
-                role="radio"
-                aria-checked={value.role === role}
-                disabled={!allowed}
-                onClick={() => onChange({ ...value, role, canCreateProjects: role === 'viewer' ? false : value.canCreateProjects })}
-                className={cn(
-                  'flex flex-col items-start justify-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-45',
-                  value.role === role ? 'border-accent bg-accent-soft' : 'border-line enabled:hover:bg-hover',
-                )}
-              >
-                <span className="block text-[14px] font-medium">{t(roleLabel(role))}</span>
-                <span className="block text-[12px] leading-snug text-fg-3">{allowed ? t(`role.${role}.desc` as TKey) : t('role.onlyOwner')}</span>
-              </button>
-            );
-          })}
-        </div>
-      </Block>
+      {showRole && (
+        <Block label={t('invite.role')}>
+          <div role="radiogroup" className="grid gap-1.5 sm:grid-cols-2">
+            {ROLE_ORDER.map((role) => {
+              const allowed = canAssignRole(actor, role);
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  role="radio"
+                  aria-checked={value.role === role}
+                  disabled={!allowed}
+                  onClick={() => onChange({ ...value, role, canCreateProjects: role === 'viewer' ? false : value.canCreateProjects })}
+                  className={cn(
+                    'flex flex-col items-start justify-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-45',
+                    value.role === role ? 'border-accent bg-accent-soft' : 'border-line enabled:hover:bg-hover',
+                  )}
+                >
+                  <span className="block text-[14px] font-medium">{t(roleLabel(role))}</span>
+                  <span className="block text-[12px] leading-snug text-fg-3">{allowed ? t(`role.${role}.desc` as TKey) : t('role.onlyOwner')}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Block>
+      )}
 
       <Block label={t('invite.access')}>
         {admin ? (

@@ -55,7 +55,44 @@ export interface InviteResult {
 export interface MailSettings {
   configured: boolean;
   from?: string;
+  /** 'env': set by the server's environment; 'app': saved in Settings > Email. */
+  source?: 'env' | 'app' | null;
+  /** Whether this person may connect or change the mailbox (the owner, unless the environment sets it). */
+  editable?: boolean;
+  settings?: SavedMailSettings | null;
 }
+
+/** A mailbox saved in the app; the password never comes back from the server. */
+export interface SavedMailSettings {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  name: string;
+  publicUrl: string;
+}
+
+export interface MailSettingsInput extends SavedMailSettings {
+  /** Empty keeps the saved password for the same login. */
+  pass: string;
+}
+
+/** Why the server could not send a letter with new settings. */
+export type MailProblem = 'auth' | 'host' | 'connect' | 'sender' | 'unknown';
+
+/**
+ * A shareable invite link. The team link gives `editor` or `viewer` on every project; a project link
+ * gives that project at `editor`, `commenter` or `viewer`.
+ */
+export interface JoinLink {
+  enabled: boolean;
+  token: string | null;
+  url: string | null;
+  level: 'editor' | 'commenter' | 'viewer';
+  joined: number;
+  createdAt: number | null;
+}
+export const NO_LINK: JoinLink = { enabled: false, token: null, url: null, level: 'editor', joined: 0, createdAt: null };
 
 export const ROLE_ORDER: AccessRole[] = ['owner', 'admin', 'editor', 'viewer'];
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,10 +101,11 @@ interface RemoteState {
   users: AuthUser[];
   invites: PendingInvite[];
   mail: MailSettings;
+  link: JoinLink;
   loaded: boolean;
   error: string;
 }
-const useRemote = create<RemoteState>(() => ({ users: [], invites: [], mail: { configured: false }, loaded: false, error: '' }));
+const useRemote = create<RemoteState>(() => ({ users: [], invites: [], mail: { configured: false }, link: NO_LINK, loaded: false, error: '' }));
 const uiLang = () => useData.getState().prefs.lang;
 
 let inflight: Promise<void> | null = null;
@@ -81,14 +119,15 @@ export function refreshMembers(): Promise<void> {
   if (!user) return Promise.resolve();
   inflight ??= (
     isAdmin(user)
-      ? api<{ members: AuthUser[]; invites: PendingInvite[]; mail?: MailSettings }>('/api/admin/members')
-      : api<{ members: AuthUser[] }>('/api/members').then((r) => ({ members: r.members, invites: [], mail: undefined }))
+      ? api<{ members: AuthUser[]; invites: PendingInvite[]; mail?: MailSettings; link?: JoinLink }>('/api/admin/members')
+      : api<{ members: AuthUser[] }>('/api/members').then((r) => ({ members: r.members, invites: [], mail: undefined, link: undefined }))
   )
     .then((result) =>
       useRemote.setState({
         users: result.members,
         invites: result.invites,
         mail: result.mail ?? { configured: false },
+        link: result.link ?? NO_LINK,
         loaded: true,
         error: '',
       }),
@@ -159,6 +198,7 @@ export function useMembers() {
     members,
     invites: signedIn ? remote.invites : [],
     mail: signedIn ? remote.mail : { configured: false },
+    link: signedIn ? withJoinUrl(remote.link) : NO_LINK,
     loaded: !signedIn || remote.loaded,
     error: signedIn ? remote.error : '',
     remote: signedIn,
@@ -208,6 +248,35 @@ const nameFromEmail = (email: string) => {
 
 export const inviteUrl = (token: string, email: string) =>
   `${window.location.origin}/?invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+
+/** The server builds the link from its public address; without one it is made from this page's origin. */
+export const withJoinUrl = (link: JoinLink): JoinLink =>
+  link.token && !link.url ? { ...link, url: `${window.location.origin}/?join=${encodeURIComponent(link.token)}` } : link;
+
+/**
+ * Turns the team's invite link on or off, changes the role it gives, or replaces it (`reset`),
+ * after which the old link stops working.
+ */
+export async function updateJoinLink(patch: { enabled?: boolean; level?: 'editor' | 'viewer'; reset?: boolean }): Promise<JoinLink> {
+  const { link } = await api<{ link: JoinLink }>('/api/admin/invite-link', 'POST', patch);
+  useRemote.setState({ link });
+  return withJoinUrl(link);
+}
+
+/** A project's invite link (administrators only). */
+export async function getProjectJoinLink(projectId: ID): Promise<JoinLink> {
+  const { link } = await api<{ link: JoinLink }>(`/api/projects/${encodeURIComponent(projectId)}/invite-link`);
+  return withJoinUrl(link);
+}
+
+/** Creates, turns off, changes the level of, or resets a project's invite link. */
+export async function updateProjectJoinLink(
+  projectId: ID,
+  patch: { enabled?: boolean; level?: JoinLink['level']; reset?: boolean },
+): Promise<JoinLink> {
+  const { link } = await api<{ link: JoinLink }>(`/api/projects/${encodeURIComponent(projectId)}/invite-link`, 'POST', patch);
+  return withJoinUrl(link);
+}
 
 function cleanAccess(input: AccessInput): AccessInput {
   const admin = input.role === 'owner' || input.role === 'admin';
@@ -348,6 +417,22 @@ export async function createResetLink(member: Member): Promise<{ url: string; em
   };
 }
 
+/**
+ * Connects the team's mailbox: the server signs in and sends a test letter to the owner,
+ * and saves the settings only when that worked. Rejects with `problem` or `field` otherwise.
+ */
+export async function saveMailSettings(input: MailSettingsInput): Promise<{ to: string }> {
+  const result = await api<{ mail: MailSettings; to: string }>('/api/admin/mail', 'PUT', { ...input, lang: uiLang() });
+  useRemote.setState({ mail: result.mail });
+  return { to: result.to };
+}
+
+/** Stops sending email from the saved mailbox. */
+export async function removeMailSettings(): Promise<void> {
+  const result = await api<{ mail: MailSettings }>('/api/admin/mail', 'DELETE', {});
+  useRemote.setState({ mail: result.mail });
+}
+
 /** Sends a test email to the administrator's own address; resolves to that address. */
 export async function sendTestMail(): Promise<string> {
   const result = await api<{ to: string }>('/api/admin/mail/test', 'POST', { lang: uiLang() });
@@ -356,10 +441,11 @@ export async function sendTestMail(): Promise<string> {
 
 /** Invitation text for a mail client, for when the server does not send email itself. */
 export function inviteMailto(email: string, url: string, workspace: string, lang: 'ru' | 'en'): string {
-  const subject = lang === 'ru' ? `Приглашение в ${workspace} в Done` : `Join ${workspace} on Done`;
+  const team = workspace.trim();
+  const subject = lang === 'ru' ? `Приглашение в ${team ? `«${team}»` : 'Done'}` : `Join ${team || 'Done'}`;
   const body =
     lang === 'ru'
-      ? `Привет!\n\nПриглашаю тебя в пространство «${workspace}» в Done. Открой ссылку, чтобы создать аккаунт (действует 7 дней):\n\n${url}\n`
-      : `Hi!\n\nYou are invited to the "${workspace}" workspace on Done. Open this link to create your account (valid for 7 days):\n\n${url}\n`;
+      ? `Привет!\n\nПриглашаю тебя в ${team ? `команду «${team}» в Done` : 'нашу команду в Done'}. Открой ссылку, чтобы создать аккаунт (действует 7 дней):\n\n${url}\n`
+      : `Hi!\n\nJoin ${team ? `the ${team} team on Done` : 'our team on Done'}. Open this link to create your account (valid for 7 days):\n\n${url}\n`;
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }

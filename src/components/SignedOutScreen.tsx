@@ -1,4 +1,4 @@
-import { ArrowRight, DoorOpen } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Button } from './ui/Button';
 import './signed-out.css';
@@ -24,13 +24,10 @@ export function SignedOutScreen({
 
   return (
     <section className="signed-out-screen" aria-labelledby="signed-out-title">
-      <div className="signed-out-icon" aria-hidden="true">
-        <DoorOpen size={38} strokeWidth={1.5} />
-      </div>
       <h1 id="signed-out-title" ref={heading} tabIndex={-1}>
         {ru ? 'Вы вышли из Done' : 'You’re signed out'}
       </h1>
-      <p>{ru ? 'Ваше пространство будет ждать вас.' : 'Your workspace will be here when you’re ready.'}</p>
+      <p>{ru ? 'Всё останется на своих местах.' : 'Everything will be right where you left it.'}</p>
       <Button className="signed-out-primary" onClick={onContinue} iconRight={<ArrowRight size={16} aria-hidden="true" />}>
         {ru ? 'Войти снова' : 'Sign in again'}
       </Button>

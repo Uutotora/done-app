@@ -7,9 +7,9 @@ import { detectLang } from '@/lib/i18n';
 import { collectGarbageBlobs } from '@/lib/storage';
 import { TooltipProvider } from '@/components/ui/Overlay';
 import { AppShell } from '@/components/AppShell';
-import { Onboarding } from '@/views/Onboarding';
 import { Splash } from '@/components/Logo';
 import { AuthGate } from '@/components/AuthGate';
+import { seedDemo, useAuth } from '@/lib/auth';
 import { Home } from '@/views/Home';
 import { MyWork } from '@/views/MyWork';
 import { InboxView } from '@/views/Inbox';
@@ -85,7 +85,7 @@ export function App() {
       <TooltipProvider>
         <AuthGate>
           {!onboarded ? (
-            <Onboarding />
+            <EnsureData />
           ) : (
             <BrowserRouter>
               <Routes>
@@ -121,6 +121,19 @@ export function App() {
       </TooltipProvider>
     </MotionConfig>
   );
+}
+
+/**
+ * There is no separate onboarding: accounts arrive ready from the sign-up screens and the demo
+ * fills itself with examples. Anything left empty (such as an old local copy) is filled the same way.
+ */
+function EnsureData() {
+  const mode = useAuth((s) => s.mode);
+  useEffect(() => {
+    if (mode === 'local') void seedDemo();
+    else useData.setState({ onboarded: true });
+  }, [mode]);
+  return <Splash />;
 }
 
 function Lazy({ el }: { el: React.ReactNode }) {

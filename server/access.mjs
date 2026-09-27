@@ -422,8 +422,13 @@ export function applyChanges(current, changes, user, info = {}) {
         if (!isAdmin(user)) {
           const othersReacted = (from, to) => [...reactionAuthors(from, to)].some((person) => person !== user.id);
           if (!existing && after) {
-            // New comments are posted as yourself, unless a deleted task or page is restored together with its thread.
-            const restored = !targetOf(after, current) && !!targetOf(after, next);
+            // New comments are posted as yourself, unless this exact comment is coming back from the
+            // trash together with its task or page: matched by id and content, never merely by the
+            // target reappearing, so a forged comment can't ride along on a same-batch creation.
+            const restored =
+              !targetOf(after, current) &&
+              !!targetOf(after, next) &&
+              current.trash.some((entry) => same(entry.snapshot?.comments?.[id], after));
             if (!restored && (after.authorId !== user.id || othersReacted(undefined, after.reactions))) denied();
           }
           if (existing && after) {

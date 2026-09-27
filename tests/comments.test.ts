@@ -261,6 +261,45 @@ describe('comments on the server', () => {
     expect(status(() => applyChanges(state(c), change(c, { ...c, reactions: undefined }), owner))).toBe(200);
   });
 
+  it('never lets a forged comment ride along on the same-batch creation of its target', () => {
+    // Ben creates task t1 himself in this very save, then tries to slip in a comment
+    // "from" Ann carrying Ann's and Cal's reactions, hoping the missing-target-to-present
+    // check reads it as a restore. It must be denied just like any other new comment of his.
+    const data = state();
+    const task = { projectId: 'alpha', type: 'task', status: 'backlog', priority: 'none', tags: [], order: 1, createdAt: ts, updatedAt: ts };
+    delete (data.items as Record<string, unknown>).t1;
+    const forged = comment({ authorId: 'ann', reactions: { '👍': ['ann', 'cal'] } });
+    const changes = {
+      records: {
+        items: { t1: { before: null, after: { ...task, id: 't1', title: 'One' } } },
+        comments: { c1: { before: null, after: forged } },
+      },
+    };
+    expect(status(() => applyChanges(data, changes, ben))).toBe(403);
+  });
+
+  it('restores a comment together with its trashed task, but only as the exact content that was trashed', () => {
+    const c = comment({ authorId: 'ann', reactions: { '👍': ['ann', 'cal'] } });
+    const data = state(c) as unknown as { trash: unknown[] } & Record<string, Record<string, unknown>>;
+    const task = data.items.t1 as Record<string, unknown>;
+    delete data.items.t1;
+    delete data.comments.c1;
+    data.trash = [
+      { id: 'tr1', kind: 'item', title: 'One', snapshot: { items: { t1: task }, comments: { c1: c } }, deletedAt: ts },
+    ];
+    const restore = { records: { items: { t1: { before: null, after: task } }, comments: { c1: { before: null, after: c } } } };
+    // Ben did not write this comment and is not among its reactors, but restoring it verbatim is fine.
+    expect(status(() => applyChanges(data, restore, ben))).toBe(200);
+    // Changing so much as one reactor while "restoring" is a forgery, not a restore.
+    const tampered = {
+      records: {
+        items: { t1: { before: null, after: task } },
+        comments: { c1: { before: null, after: { ...c, reactions: { '👍': ['ann', 'cal', 'ben'] } } } },
+      },
+    };
+    expect(status(() => applyChanges(data, tampered, ben))).toBe(403);
+  });
+
   it('validates links and reactions', () => {
     const manyEmoji = [...new Set(ALL_EMOJI.map((e) => e.e))].filter(isReactionKey);
     expect(manyEmoji.length).toBeGreaterThan(50);

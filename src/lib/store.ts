@@ -8,6 +8,7 @@ import { isReactionKey, refsInText, toggleReactionIn } from './comments';
 import { PLANE_DEFAULTS, DEFAULT_AI_MODEL, PLANE_GROUP_TO_STATUS } from './constants';
 import { anchoredRecurrence, nextInstance, normalizeRecurrence, recurringActivityId } from './recurrence';
 import { childType, itemFromTemplate, sanitizeTemplate, templateFromItem } from './templates';
+import { randomAnimalAvatar } from './avatars';
 import type {
   Activity,
   ActivityKind,
@@ -42,7 +43,7 @@ const ACTIVITY_LIMIT = 3000;
 const TRASH_TTL_DAYS = 30;
 
 export function createEmptyData(lang: Lang, name = ''): DataState {
-  const me: Person = { id: uid('p'), name: name || (lang === 'ru' ? 'Вы' : 'You'), color: 'blue' };
+  const me: Person = { id: uid('p'), name: name || (lang === 'ru' ? 'Вы' : 'You'), color: 'blue', avatar: randomAnimalAvatar() };
   return {
     schema: SCHEMA_VERSION,
     onboarded: false,
@@ -350,7 +351,7 @@ export const useData = create<Store>()(
 
       addPerson: (p) => {
         const id = uid('p');
-        set((s) => ({ people: { ...s.people, [id]: { ...p, id } } }));
+        set((s) => ({ people: { ...s.people, [id]: { ...p, id, avatar: p.avatar || randomAnimalAvatar() } } }));
         return id;
       },
       updatePerson: (id, patch) => set((s) => (s.people[id] ? { people: { ...s.people, [id]: { ...s.people[id], ...patch } } } : {})),

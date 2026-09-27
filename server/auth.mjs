@@ -30,6 +30,7 @@ import {
 } from './blobs.mjs';
 import { contentEvents, isContentAction } from './contentAudit.mjs';
 import { createMail, inviteEmail, resetEmail, testEmail } from './mail.mjs';
+import { randomAnimalAvatar } from '../shared/avatars.mjs';
 const derive = promisify(scrypt);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {
@@ -562,7 +563,7 @@ export function createAuthApi({
           let data = setup ? sharedState(input.data) : { ...current.data, people: { ...current.data.people } };
           validateState(data);
           const color = PERSON_COLORS[Object.keys(data.people).length % PERSON_COLORS.length];
-          data.people[id] = { id, name, email, color: setup ? 'blue' : color };
+          data.people[id] = { id, name, email, color: setup ? 'blue' : color, avatar: randomAnimalAvatar() };
           db.exec('BEGIN IMMEDIATE');
           try {
             db.prepare(

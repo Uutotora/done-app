@@ -3,6 +3,7 @@ import { B } from './blocks';
 import { generateProjectMap } from './mapgen';
 import { fromISODate, shiftISO, todayISO } from './dates';
 import { nowIso, uid } from './utils';
+import { randomAnimalAvatar } from './avatars';
 import type {
   AppNotification,
   DataState,
@@ -68,7 +69,7 @@ export function createSampleData(input: OnboardingInput): { data: DataState; blo
   // ---- People
   const person = (name: string, role: string, color: Person['color']): ID => {
     const id = uid('p');
-    data.people[id] = { id, name, role, color };
+    data.people[id] = { id, name, role, color, avatar: randomAnimalAvatar() };
     return id;
   };
   const anna = person(L('Анна Смирнова', 'Anna Carter'), L('Дизайн лид', 'Design lead'), 'purple');

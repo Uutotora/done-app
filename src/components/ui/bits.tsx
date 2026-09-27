@@ -10,8 +10,9 @@ import {
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
-import { cn, initials } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { isSafePhoto } from '@/lib/photo';
+import { animalAvatarStyle, isAnimalAvatar, personAnimalAvatar } from '@/lib/avatars';
 import { getIcon } from '@/lib/icons';
 import type { ColorName, IconValue, Person } from '@/lib/types';
 
@@ -51,9 +52,9 @@ export function Chip({
 
 /* --------------------------------- Avatar --------------------------------- */
 
-/** A person's photo, emoji avatar or initials on their color, in that order. */
+/** A photo or custom emoji takes precedence; otherwise use the person's animal portrait. */
 export function Avatar({ person, size = 20, className, ring }: { person?: Person; size?: number; className?: string; ring?: boolean }) {
-  // A photo that fails to decode falls back to initials instead of a broken image.
+  // A photo that fails to decode falls back to an avatar instead of a broken image.
   const [broken, setBroken] = useState<string>();
   if (!person) {
     return (
@@ -78,7 +79,7 @@ export function Avatar({ person, size = 20, className, ring }: { person?: Person
       />
     );
   }
-  if (person.avatar) {
+  if (person.avatar && !isAnimalAvatar(person.avatar) && !person.avatar.startsWith('animal:')) {
     return (
       <span
         data-color={person.color}
@@ -100,16 +101,18 @@ export function Avatar({ person, size = 20, className, ring }: { person?: Person
   }
   return (
     <span
-      data-color={person.color}
       title={person.name}
+      role="img"
+      aria-label={person.name}
+      data-animal-avatar={personAnimalAvatar(person)}
       className={cn(
-        'tint-solid inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white',
+        'inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-white',
         ring && 'ring-2 ring-[var(--bg)]',
         className,
       )}
-      style={{ width: size, height: size, fontSize: Math.max(8, size * 0.42), letterSpacing: '-0.02em' }}
+      style={{ width: size, height: size }}
     >
-      {initials(person.name)}
+      <span aria-hidden="true" className="block shrink-0" style={animalAvatarStyle(personAnimalAvatar(person), size)} />
     </span>
   );
 }

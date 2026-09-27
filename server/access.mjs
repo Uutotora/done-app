@@ -1,4 +1,5 @@
 import { COLLECTIONS, applyRecord, diffShared, mergeFields, same } from './merge.mjs';
+import { isValidAvatar } from '../shared/avatars.mjs';
 
 /**
  * Roles of the workspace, strongest first:
@@ -356,6 +357,7 @@ export function validateState(state) {
   }
   for (const person of Object.values(state.people)) {
     if (!isValidPhoto(person.photo)) throw error(400, 'Invalid photo');
+    if (!isValidAvatar(person.avatar)) throw error(400, 'Invalid avatar');
   }
   for (const c of Object.values(state.comments)) {
     if ((c.refs !== undefined && !validCommentRefs(c.refs)) || (c.reactions !== undefined && !validReactions(c.reactions)))

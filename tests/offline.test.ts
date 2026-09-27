@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChangeSet } from '../server/merge.mjs';
-import { api, enterAccount, flushWorkspace, logout, useAuth, type AuthUser } from '@/lib/auth';
+import { api, bootstrapAuth, dismissSignedOut, enterAccount, enterLocal, flushWorkspace, logout, useAuth, type AuthUser } from '@/lib/auth';
 import {
   classifyFailure,
   loadPendingEntries,
@@ -118,10 +118,18 @@ describe('unsaved changes kept in the browser', () => {
 
 describe('saving across a lost connection', () => {
   const user: AuthUser = { id: 'u-owner', name: 'Owner', email: 'owner@example.com', role: 'owner', projectIds: null };
-  const server = { data: shared({ p0: project('p0', 'Server') }), revision: 1, patches: [] as { changes: ChangeSet }[], offline: false };
+  const server = {
+    data: shared({ p0: project('p0', 'Server') }),
+    revision: 1,
+    patches: [] as { changes: ChangeSet }[],
+    offline: false,
+    logoutError: 0,
+  };
   const fetch = vi.fn(async (path: string, init: RequestInit = {}) => {
     if (server.offline) throw new TypeError('Failed to fetch');
     const method = init.method ?? 'GET';
+    if (path === '/api/auth/session') return Response.json({ user: null, setup: false });
+    if (path === '/api/auth/logout' && server.logoutError) return Response.json({ error: 'Could not end session' }, { status: server.logoutError });
     if (path === '/api/workspace' && method === 'GET') return Response.json({ data: server.data, revision: server.revision, user });
     if (path === '/api/workspace' && method === 'PATCH') {
       server.patches.push(JSON.parse(String(init.body)));
@@ -147,6 +155,7 @@ describe('saving across a lost connection', () => {
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
     vi.stubGlobal('localStorage', memoryStorage());
     vi.stubGlobal('sessionStorage', memoryStorage());
+    vi.stubGlobal('location', { search: '' });
     useData.getState().setPrefs({ lang: 'en' });
   });
   afterAll(async () => {
@@ -219,9 +228,66 @@ describe('saving across a lost connection', () => {
     server.offline = true;
     await logout();
     expect(useAuth.getState().mode).toBe('signedIn');
+    expect(useAuth.getState().signedOutReason).toBeNull();
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
     expect(toasts().at(-1)).toBe('No connection. Sign out once you are back online so your changes are not lost.');
     server.offline = false;
     await flushWorkspace();
     expect(useAuth.getState().sync).toBe('saved');
+  });
+
+  it('does not claim sign out succeeded when the logout request loses its connection or fails', async () => {
+    server.offline = true;
+    await logout();
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedIn', signedOutReason: null, user });
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
+    server.offline = false;
+
+    server.logoutError = 500;
+    await expect(logout()).rejects.toMatchObject({ status: 500 });
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedIn', signedOutReason: null, user });
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
+    server.logoutError = 0;
+  });
+
+  it('shows the completed sign-out screen after the server ends the session, including after reload', async () => {
+    sessionStorage.setItem('done:auth-draft', JSON.stringify({ email: user.email, name: user.name }));
+    await logout();
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedOut', signedOutReason: 'logout', user: null });
+    expect(useData.getState().projects).toEqual({});
+    expect(sessionStorage.getItem('done:signed-out')).toBe('logout');
+    expect(sessionStorage.getItem('done:auth-draft')).toBeNull();
+
+    useAuth.setState({ mode: 'loading', signedOutReason: null });
+    await bootstrapAuth();
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedOut', signedOutReason: 'logout' });
+    dismissSignedOut();
+    expect(useAuth.getState().signedOutReason).toBeNull();
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
+  });
+
+  it('gives invitation and password-reset links priority over a previous sign-out screen', async () => {
+    for (const search of ['?invite=example-token', '?reset=example-token']) {
+      sessionStorage.setItem('done:signed-out', 'logout');
+      useAuth.setState({ mode: 'loading', signedOutReason: 'logout' });
+      location.search = search;
+      await bootstrapAuth();
+      expect(useAuth.getState()).toMatchObject({ mode: 'signedOut', signedOutReason: null });
+      expect(sessionStorage.getItem('done:signed-out')).toBeNull();
+    }
+    location.search = '';
+  });
+
+  it('clears the confirmation when entering the demo or an account and completes local sign out', async () => {
+    sessionStorage.setItem('done:signed-out', 'logout');
+    useAuth.setState({ signedOutReason: 'logout' });
+    await enterLocal();
+    expect(useAuth.getState()).toMatchObject({ mode: 'local', signedOutReason: null });
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
+    await logout();
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedOut', signedOutReason: 'logout', user: null });
+    await enterAccount(user);
+    expect(useAuth.getState()).toMatchObject({ mode: 'signedIn', signedOutReason: null });
+    expect(sessionStorage.getItem('done:signed-out')).toBeNull();
   });
 });

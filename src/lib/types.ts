@@ -37,7 +37,7 @@ export interface Person {
   role?: string;
   color: ColorName;
   email?: string;
-  /** Optional emoji avatar instead of initials. */
+  /** Selected animal portrait (animal:<id>) or a custom emoji. */
   avatar?: string;
   /** Profile photo: a small square image as a data URL (png, jpeg, webp or gif). */
   photo?: string;

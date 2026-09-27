@@ -10,7 +10,27 @@ Original editorial ink illustration inspired by the visual language in the user'
 
 Final asset: `public/illustrations/team-wave-24.png`. Created with the built-in imagegen tool from the initial four-drawing concept. The final sheet contains 24 original drawings in a 6×4 grid, played continuously with CSS step-end over 2 seconds (12 drawings per second). All 24 cells are observed in the browser playback test. There are no pause buttons or material selectors: the heading always uses the water treatment, as requested. System reduced-motion preferences still disable decorative movement. The welcome scene is 320px on a desktop, 240px on a short laptop, and 260px on mobile. Registration, login, invitations and recovery use a separate composition without people: four floating stationery illustrations on the sides, or a compact notebook and paper plane above the form on narrow screens. The corner wordmark is replaced by the existing D logo. Dark mode inverts the ink scene.
 
-The greeting now follows the user's supplied `VerticalCutReveal` reference: uppercase blue type, full-color emoji inside three left-aligned lines, and staggered vertical spring reveals in alternating directions. `src/components/ui/vertical-cut-reveal.tsx` uses the existing `motion/react` dependency, keeps emoji graphemes intact, and immediately reveals text when reduced motion is enabled. DONE retains the water effect. The accessible heading remains one readable phrase; decorative letter splits are hidden from assistive technology.
+The welcome uses sentence-case Inter, a centered two-line heading (“Большие идеи. Понятные планы.” / “Big ideas. Clear plans.”), and a short whole-word reveal. The final word retains the requested water treatment. Inter is also registered in the [official Notion login stylesheet](https://app.notion.com/_assets/main-9ac30f74d00619f5.css); spacing here is adapted to Done's form rather than claimed as an exact reproduction. The heading is one readable phrase for assistive technology. Two original SVG paper stars fold and unfold at the sides, using 24 poses per 6–7-second loop with continuous interpolation. On narrow screens they are hidden; reduced motion displays a static pose.
+
+Completed sign-out has its own full screen. A sessionStorage marker retains it across reloads, while invitations and recovery links take precedence. Failed sign-outs never show success; entering an account or demo clears the marker. Existing offline-save guards remain in place.
+
+## Minimal animal avatars
+
+Asset: `public/illustrations/animal-avatars.png`, created with the built-in imagegen tool using the user's minimal black-and-white reference. 24 heads with even contours, dot eyes and simple solid shapes. `src/lib/avatars.ts` contains individually measured ink bounds for every portrait: the generated sheet is not perfectly gridded. Each bounds rectangle has two source pixels of antialiasing margin, is scaled proportionally to 80% of the avatar's size, and centered inside the circle. This avoids adjacent illustrations bleeding into an avatar and preserves ears and whiskers.
+
+New profiles receive a random animal ID once and persist it; old profiles have a stable fallback based on person ID. Photos and custom emoji keep precedence. Settings → My account provides an accessible chooser, keyboard navigation, random selection, preview, cancel and save. The shared manifest validates reserved animal IDs on both client and server.
+
+Final generation prompt (reference used for style only):
+
+```text
+Use case: stylized-concept. Asset: production avatar atlas for a minimal workspace app. The supplied image is a STYLE REFERENCE ONLY. Generate 24 NEW animal head icons in exactly its SUPER MINIMAL flat geometric black and white style. Smooth even medium black contours, tiny circular dot eyes, simple curves, a few solid black shapes. Heads only, NO necks/bodies. Friendly clear silhouettes, readable at 24px. Absolutely NO hair texture, fur strokes, hatching, sketchiness, shading, gray fills, gradients, realism, clothing or accessories. White fill and solid black only, on pure white background. Small simple mouths/noses, like the reference panda/pig/frog.
+Output one 1536x1024 landscape atlas, exact 6 columns by 4 rows, 24 equal 256x256 square cells with NO gutters, NO lines, NO captions, NO text. Each head centered in its cell, consistently 156-172 pixels wide including ears, fully contained with generous margins. Exact row-major species order:
+Row1 cat, dog, fox, bear, rabbit, panda.
+Row2 koala, frog, pig, cow, mouse, hedgehog.
+Row3 owl, penguin, raccoon, tiger, lion, wolf.
+Row4 otter, elephant, monkey, sloth, deer, capybara.
+Important: match the reference's extreme simplicity. Hedgehog black spiky outline with simple white face; panda round black eye patches; pig circle head and oval snout; frog simple eye bumps; cat black ears and minimal whiskers. Other animals equally simple. Clean consistent vector-like linework, no decorative details.
+```
 
 Only email, name and workspace drafts persist in sessionStorage; passwords and invitation tokens do not. Clear drafts on successful account entry. Account data and membership continue using the existing server/session model.
 

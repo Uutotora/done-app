@@ -7,7 +7,7 @@ test('welcome, registration draft, durable account, project and viewer access', 
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Большие идеи. Понятные планы.' })).toBeVisible();
   await expect(page.locator('.auth-flipbook')).toBeVisible();
   await expect(page.locator('.auth-material').first()).toHaveClass(/auth-material-water/);
   await page.screenshot({ path: testInfo.outputPath('welcome.png'), animations: 'disabled' });
@@ -32,9 +32,34 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await page.screenshot({ path: testInfo.outputPath('registration.png'), animations: 'disabled' });
   await page.getByRole('button', { name: 'Создать пространство', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Мария/ })).toBeVisible();
+  // A chosen animal is saved to the account, survives reload, and remains selected.
+  await page.goto('/settings/account');
+  await page.getByRole('button', { name: 'Выбрать аватар', exact: true }).click();
+  const avatars = page.getByRole('dialog', { name: 'Выберите аватар' });
+  await expect(avatars.getByRole('radio')).toHaveCount(24);
+  await avatars.getByRole('radio', { name: 'Капибара', exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('avatar-picker.png'), animations: 'disabled' });
+  const savedAvatar = page.waitForResponse((r) => r.url().endsWith('/api/workspace') && r.request().method() === 'PATCH' && r.status() === 200);
+  await avatars.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await savedAvatar;
+  await page.reload();
+  await page.getByRole('button', { name: 'Выбрать аватар', exact: true }).click();
+  await expect(avatars.getByRole('radio', { name: 'Капибара', exact: true })).toBeChecked();
+  await avatars.getByRole('button', { name: 'Случайный', exact: true }).click();
+  await expect(avatars.getByRole('radio', { name: 'Капибара', exact: true })).not.toBeChecked();
+  await avatars.getByRole('button', { name: 'Отмена', exact: true }).click();
+  await page.getByRole('button', { name: 'Выбрать аватар', exact: true }).click();
+  await expect(avatars.getByRole('radio', { name: 'Капибара', exact: true })).toBeChecked();
+  await page.keyboard.press('Escape');
+  await page.goto('/');
   // Setup must switch to login immediately, even without reloading the page.
   await page.getByRole('button', { name: 'Меню пространства' }).click();
   await page.getByRole('menuitem', { name: 'Выйти' }).click();
+  await expect(page.getByRole('heading', { name: 'Вы вышли из Done' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Вы вышли из Done' })).toBeVisible();
+  await expect(page.getByText('owner@example.test', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Войти снова' }).click();
   await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
   await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
   await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');
@@ -131,11 +156,16 @@ test('welcome, registration draft, durable account, project and viewer access', 
   await viewer.goto(invitation);
   await expect(viewer.getByRole('heading', { name: 'Эта ссылка уже не действует' })).toBeVisible();
   await viewer.getByRole('button', { name: 'Перейти ко входу' }).click();
-  await expect(viewer.getByRole('heading', { name: 'Добро пожаловать в Done' })).toBeVisible();
+  await expect(viewer.getByRole('heading', { name: 'Большие идеи. Понятные планы.' })).toBeVisible();
   await viewerContext.close();
 
   await page.getByRole('button', { name: 'Меню пространства' }).click();
   await page.getByRole('menuitem', { name: 'Выйти' }).click();
+  await expect(page.getByRole('heading', { name: 'Вы вышли из Done' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Вы вышли из Done' })).toBeVisible();
+  await expect(page.getByText('owner@example.test', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Войти снова' }).click();
   await page.getByLabel('Ваша рабочая почта').fill('owner@example.test');
   await page.getByRole('button', { name: 'Продолжить с почтой' }).click();
   await page.getByLabel('Пароль', { exact: true }).fill('Disposable-QA-Password-2026');

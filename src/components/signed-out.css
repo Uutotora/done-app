@@ -1,0 +1,71 @@
+.signed-out-screen {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  padding-block: 32px;
+}
+.signed-out-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 28px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.signed-out-screen h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+.signed-out-screen h1:focus {
+  outline: none;
+}
+.signed-out-screen p {
+  margin: 14px 0 30px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.signed-out-screen .signed-out-primary {
+  width: 100%;
+  height: 42px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--bg);
+  background: var(--text);
+  font-size: 13px;
+}
+.signed-out-screen .signed-out-primary:hover {
+  opacity: 0.9;
+}
+.signed-out-demo {
+  margin-top: 18px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 12px;
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+.signed-out-demo:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.signed-out-screen button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .signed-out-screen h1 {
+    font-size: 28px;
+  }
+}

@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Mail, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import { api, bootstrapAuth, enterAccount, enterLocal, useAuth, type AuthUser } from '@/lib/auth';
+import { api, bootstrapAuth, dismissSignedOut, enterAccount, enterLocal, useAuth, type AuthUser } from '@/lib/auth';
 import { createEmptyData, useData } from '@/lib/store';
 import { useLang } from '@/lib/i18n';
 import { Logo, Splash } from './Logo';
@@ -9,6 +9,8 @@ import { ForgotPassword, ResetPassword } from './AuthRecovery';
 import { WelcomeHeading } from './WelcomeHeading';
 import { AuthArtwork } from './AuthArtwork';
 import { AuthStationery } from './AuthStationery';
+import { SignedOutScreen } from './SignedOutScreen';
+import { AuthWelcomeOrnaments } from './AuthWelcomeOrnaments';
 import './auth.css';
 
 const motionQuery = '(prefers-reduced-motion: reduce)';
@@ -52,7 +54,7 @@ function readDraft(): { email?: string; name?: string; workspace?: string } {
 function AuthPage() {
   const lang = useLang();
   const ru = lang === 'ru';
-  const { setup, error: serverError, user: currentUser } = useAuth();
+  const { setup, error: serverError, user: currentUser, signedOutReason } = useAuth();
   const [inviteToken, setInviteToken] = useState(() => new URLSearchParams(location.search).get('invite') || '');
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(location.search).get('reset') || '');
   const [step, setStep] = useState<Step>(resetToken ? 'reset' : inviteToken ? 'checking' : 'welcome');
@@ -73,12 +75,25 @@ function AuthPage() {
   const [retry, setRetry] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const register = step === 'setup' || step === 'join';
+  const showSignedOut = signedOutReason === 'logout' && !inviteToken && !resetToken;
   const changeStep = (next: Step) => {
     setError('');
     setPassword('');
     setShowPassword(false);
     setStep(next);
   };
+  async function openDemo() {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await enterLocal(true);
+    } catch {
+      setError(ru ? 'Не удалось открыть демо. Попробуйте ещё раз.' : 'Could not open the demo. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     try {
       sessionStorage.setItem('done:auth-draft', JSON.stringify({ name, email, workspace }));
@@ -198,9 +213,29 @@ function AuthPage() {
           </button>
         ))}
       </nav>
-      <div className={`auth-stage ${step === 'welcome' ? 'auth-stage-welcome' : ''}`}>
-        {step === 'welcome' ? <AuthArtwork /> : <AuthStationery />}
-        {step === 'welcome' ? (
+      <div className={`auth-stage ${step === 'welcome' && !showSignedOut ? 'auth-stage-welcome' : ''}`}>
+        {step === 'welcome' && !showSignedOut ? (
+          <>
+            <AuthWelcomeOrnaments />
+            <AuthArtwork />
+          </>
+        ) : (
+          <AuthStationery />
+        )}
+        {showSignedOut ? (
+          <SignedOutScreen
+            ru={ru}
+            onContinue={() => {
+              dismissSignedOut();
+              changeStep('welcome');
+            }}
+            onDemo={() => {
+              void openDemo();
+            }}
+            busy={busy}
+            error={error}
+          />
+        ) : step === 'welcome' ? (
           <section className="auth-welcome">
             <WelcomeHeading ru={ru} reducedMotion={reduced} />
             <form
@@ -247,15 +282,8 @@ function AuthPage() {
               type="button"
               className="auth-demo"
               disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await enterLocal(true);
-                } catch {
-                  setError(ru ? 'Не удалось открыть демо.' : 'Could not open the demo.');
-                } finally {
-                  setBusy(false);
-                }
+              onClick={() => {
+                void openDemo();
               }}
             >
               {ru ? 'Посмотреть демо' : 'Explore demo'}

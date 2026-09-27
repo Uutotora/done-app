@@ -43,6 +43,8 @@ export interface AuthUser {
 export type SyncStatus = 'saved' | 'saving' | 'offline' | 'error';
 interface AuthState {
   mode: 'loading' | 'signedOut' | 'local' | 'signedIn';
+  /** An explicit, completed sign out; an expired session must not show this screen. */
+  signedOutReason: 'logout' | null;
   user: AuthUser | null;
   setup: boolean;
   /** The server sends email (invitations, password reset links). */
@@ -51,8 +53,35 @@ interface AuthState {
   sync: SyncStatus;
   syncError: string;
 }
-export const useAuth = create<AuthState>(() => ({ mode: 'loading', user: null, setup: false, mail: false, error: '', sync: 'saved', syncError: '' }));
+export const useAuth = create<AuthState>(() => ({
+  mode: 'loading',
+  signedOutReason: null,
+  user: null,
+  setup: false,
+  mail: false,
+  error: '',
+  sync: 'saved',
+  syncError: '',
+}));
 export const isAdmin = (user: AuthUser | null) => !!user && ['owner', 'admin'].includes(user.role);
+
+const SIGNED_OUT_KEY = 'done:signed-out';
+function savedSignedOutReason(): 'logout' | null {
+  try {
+    return sessionStorage.getItem(SIGNED_OUT_KEY) === 'logout' ? 'logout' : null;
+  } catch {
+    return null;
+  }
+}
+/** Return from the sign-out confirmation to the welcome screen. */
+export function dismissSignedOut() {
+  try {
+    sessionStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    /* The confirmation still works when session storage is unavailable. */
+  }
+  useAuth.setState({ signedOutReason: null });
+}
 
 const LEVELS: AccessLevel[] = ['viewer', 'commenter', 'editor', 'full'];
 const rank = (level: AccessLevel | null) => (level ? LEVELS.indexOf(level) : -1);
@@ -188,7 +217,7 @@ function handleSyncError(error: unknown) {
   if (kind === 'signedOut') {
     stopSync?.();
     stopSync = undefined;
-    useAuth.setState({ mode: 'signedOut', user: null, sync: 'saved', error: e.message });
+    useAuth.setState({ mode: 'signedOut', signedOutReason: null, user: null, sync: 'saved', error: e.message });
     return;
   }
   if (kind === 'offline') {
@@ -507,6 +536,7 @@ function startSync(resume = false) {
 export async function enterAccount(user: AuthUser) {
   await flushLocalStorage();
   stopSync?.();
+  dismissSignedOut();
   sessionStorage.removeItem('done:mode');
   setRemoteStorage(true);
   base = null;
@@ -545,15 +575,18 @@ export async function bootstrapAuth() {
     useAuth.setState({ setup: result.setup, mail: !!result.mail });
     const params = new URLSearchParams(location.search);
     // Invitation and reset links come first, even when already signed in or in the demo.
-    if (params.has('reset') || params.has('invite')) useAuth.setState({ mode: 'signedOut', user: result.user });
-    else if (result.user) await enterAccount(result.user);
+    if (params.has('reset') || params.has('invite')) {
+      dismissSignedOut();
+      useAuth.setState({ mode: 'signedOut', user: result.user });
+    } else if (result.user) await enterAccount(result.user);
     else if (sessionStorage.getItem('done:mode') === 'local' && !params.has('invite')) await enterLocal();
-    else useAuth.setState({ mode: 'signedOut' });
+    else useAuth.setState({ mode: 'signedOut', user: null, signedOutReason: savedSignedOutReason() });
   } catch (e) {
-    useAuth.setState({ mode: 'signedOut', error: (e as Error).message });
+    useAuth.setState({ mode: 'signedOut', signedOutReason: null, error: (e as Error).message });
   }
 }
 export async function enterLocal(withDemo = false) {
+  dismissSignedOut();
   sessionStorage.setItem('done:mode', 'local');
   stopSync?.();
   setRemoteStorage(false);
@@ -582,9 +615,11 @@ export async function logout() {
     toast({ message: tr(offline ? 'sync.logoutOffline' : 'sync.logoutUnsaved'), tone: offline ? 'default' : 'error' });
     return;
   }
+  let completed = useAuth.getState().mode === 'local';
   if (useAuth.getState().mode === 'signedIn') {
     try {
       await api('/api/auth/logout', 'POST', {});
+      completed = true;
     } catch (error) {
       // The session can only be ended on the server; signing out locally would leave it active.
       if (classifyFailure(error) !== 'offline') throw error;
@@ -600,7 +635,14 @@ export async function logout() {
   useData.getState().replaceAll(createEmptyData(useData.getState().prefs.lang));
   applying = false;
   base = null;
-  useAuth.setState({ mode: 'signedOut', user: null, sync: 'saved', error: '' });
+  try {
+    sessionStorage.removeItem('done:auth-draft');
+    if (completed) sessionStorage.setItem(SIGNED_OUT_KEY, 'logout');
+    else sessionStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    /* Keep the confirmation in memory when session storage is unavailable. */
+  }
+  useAuth.setState({ mode: 'signedOut', signedOutReason: completed ? 'logout' : null, user: null, sync: 'saved', error: '' });
 }
 
 /**

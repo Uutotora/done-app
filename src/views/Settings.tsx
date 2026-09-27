@@ -38,6 +38,7 @@ import { Button, Spinner } from '@/components/ui/Button';
 import { Avatar, Field, PageIcon, Segmented, Switch, TextInput } from '@/components/ui/bits';
 import { Dialog, Popover } from '@/components/ui/Overlay';
 import { IconPicker } from '@/components/pickers/IconPicker';
+import { AvatarPicker } from '@/components/pickers/AvatarPicker';
 import { OptionList } from '@/components/pickers/OptionList';
 import { PasswordSettings } from '@/components/AccountStatus';
 import { roleLabel } from '@/components/access/AccessControls';
@@ -154,6 +155,7 @@ export default function Settings() {
 
 function Account() {
   const t = useT();
+  const ru = useLang() === 'ru';
   const meId = useData((s) => s.meId);
   const me = useData((s) => s.people[s.meId]);
   const updatePerson = useData((s) => s.updatePerson);
@@ -161,6 +163,7 @@ function Account() {
   const actor = useActor();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [choosingAvatar, setChoosingAvatar] = useState(false);
   if (!me) return null;
 
   const upload = async (file: File) => {
@@ -193,7 +196,7 @@ function Account() {
     <>
       <H>{t('account.title')}</H>
       <div className="flex items-center gap-5">
-        <PhotoDrop person={me} busy={busy} onPick={() => fileRef.current?.click()} onFile={(f) => void upload(f)} />
+        <PhotoDrop person={me} busy={busy} onPick={() => setChoosingAvatar(true)} onFile={(f) => void upload(f)} />
         <input
           ref={fileRef}
           type="file"
@@ -219,6 +222,14 @@ function Account() {
         </div>
       </div>
       <div className="mt-6">
+        <Row
+          label={ru ? 'Аватар' : 'Avatar'}
+          hint={ru ? 'Нарисованные зверьки или ваш любимый эмодзи.' : 'An illustrated animal or your favourite emoji.'}
+        >
+          <Button size="sm" disabled={busy} onClick={() => setChoosingAvatar(true)}>
+            {ru ? 'Выбрать аватар' : 'Choose avatar'}
+          </Button>
+        </Row>
         <Row label={t('account.photoLabel')} hint={t('account.photoHint')}>
           <div className="flex flex-col-reverse items-end gap-1.5 sm:flex-row sm:items-center sm:gap-2">
             {me.photo && (
@@ -243,12 +254,21 @@ function Account() {
           <ColorDots value={me.color} onChange={(c) => updatePerson(meId, { color: c })} />
         </Row>
       </div>
+      <AvatarPicker
+        person={me}
+        open={choosingAvatar}
+        onOpenChange={setChoosingAvatar}
+        onSelect={(avatar) => {
+          updatePerson(meId, { avatar, photo: undefined });
+          toast({ message: ru ? 'Аватар обновлён' : 'Avatar updated', tone: 'success' });
+        }}
+      />
       <PasswordSettings />
     </>
   );
 }
 
-/** The avatar on the account page: click to pick a photo or drop an image onto it. */
+/** The avatar on the account page: open the chooser or drop a profile photo onto it. */
 function PhotoDrop({ person, busy, onPick, onFile }: { person: Person; busy: boolean; onPick: () => void; onFile: (file: File) => void }) {
   const t = useT();
   const [over, setOver] = useState(false);
@@ -256,8 +276,8 @@ function PhotoDrop({ person, busy, onPick, onFile }: { person: Person; busy: boo
   return (
     <button
       type="button"
-      aria-label={t('account.photoChange')}
-      title={t('account.photoChange')}
+      aria-label={t('people.avatar')}
+      title={t('people.avatar')}
       disabled={busy}
       onClick={onPick}
       onDragEnter={(e) => {

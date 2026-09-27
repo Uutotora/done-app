@@ -302,6 +302,14 @@ export interface AiConfig {
 
 export type CommentTarget = 'item' | 'doc';
 
+/** A task or page linked with @ in a comment, like a Notion page mention. */
+export interface CommentRef {
+  kind: 'item' | 'doc';
+  id: ID;
+  /** The inserted text without "@": the title at the time of linking. */
+  label: string;
+}
+
 export interface Comment {
   id: ID;
   targetKind: CommentTarget;
@@ -310,6 +318,10 @@ export interface Comment {
   text: string;
   /** People mentioned with @ in the text. */
   mentions?: ID[];
+  /** Tasks and pages linked with @ in the text. */
+  refs?: CommentRef[];
+  /** Emoji reactions: person ids in the order they reacted. Empty lists are dropped. */
+  reactions?: Record<string, ID[]>;
   createdAt: ISODateTime;
   editedAt?: ISODateTime;
 }

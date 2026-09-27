@@ -4,6 +4,7 @@ import { idbStateStorage } from './storage';
 import { nowIso, uid } from './utils';
 import { allowMutation } from './mutationPolicy';
 import { canDependOn } from './work';
+import { isReactionKey, refsInText, toggleReactionIn } from './comments';
 import { PLANE_DEFAULTS, DEFAULT_AI_MODEL, PLANE_GROUP_TO_STATUS } from './constants';
 import type {
   Activity,
@@ -11,6 +12,7 @@ import type {
   AiConfig,
   AppNotification,
   Comment,
+  CommentRef,
   CommentTarget,
   DataState,
   Doc,
@@ -132,9 +134,13 @@ export interface Actions {
 
   setMap: (projectId: ID, map: Omit<ProjectMap, 'updatedAt'>) => void;
 
-  addComment: (targetKind: CommentTarget, targetId: ID, text: string, mentions?: ID[]) => ID;
-  updateComment: (id: ID, text: string) => void;
+  /** `refs` are tasks and pages linked with @; only those still in the text are kept. */
+  addComment: (targetKind: CommentTarget, targetId: ID, text: string, mentions?: ID[], refs?: CommentRef[]) => ID;
+  /** Without `links` the existing mentions stay and links are kept while their "@label" is in the text. */
+  updateComment: (id: ID, text: string, links?: { mentions?: ID[]; refs?: CommentRef[] }) => void;
   deleteComment: (id: ID) => void;
+  /** Adds or removes the current member's emoji reaction. */
+  toggleReaction: (id: ID, emoji: string) => void;
 
   createSprint: (projectId: ID, patch?: Partial<Sprint>) => ID;
   updateSprint: (id: ID, patch: Partial<Sprint>) => void;
@@ -741,12 +747,22 @@ export const useData = create<Store>()(
 
       setMap: (projectId, map) => set((s) => ({ maps: { ...s.maps, [projectId]: { ...map, updatedAt: nowIso() } } })),
 
-      addComment: (targetKind, targetId, text, mentions = []) => {
+      addComment: (targetKind, targetId, text, mentions = [], refs = []) => {
         const id = uid('cm');
         const ts = nowIso();
         const s = get();
         const mentioned = [...new Set(mentions)].filter((p) => s.people[p]);
-        const c: Comment = { id, targetKind, targetId, text, authorId: s.meId, createdAt: ts, ...(mentioned.length ? { mentions: mentioned } : {}) };
+        const links = refsInText(text, refs);
+        const c: Comment = {
+          id,
+          targetKind,
+          targetId,
+          text,
+          authorId: s.meId,
+          createdAt: ts,
+          ...(mentioned.length ? { mentions: mentioned } : {}),
+          ...(links.length ? { refs: links } : {}),
+        };
         const target = targetKind === 'item' ? s.items[targetId] : s.docs[targetId];
         const excerpt = text.length > 160 ? `${text.slice(0, 157)}…` : text;
         const base = { targetKind, targetId, projectId: target?.projectId, text: excerpt };
@@ -766,9 +782,52 @@ export const useData = create<Store>()(
         set((st) => ({ comments: { ...st.comments, [id]: c }, ...(notifications ? { notifications } : {}) }));
         return id;
       },
-      updateComment: (id, text) =>
-        set((s) => (s.comments[id] ? { comments: { ...s.comments, [id]: { ...s.comments[id], text, editedAt: nowIso() } } } : {})),
+      updateComment: (id, text, links) => {
+        const s = get();
+        const prev = s.comments[id];
+        if (!prev) return;
+        const ts = nowIso();
+        const next: Comment = { ...prev, text, editedAt: ts };
+        const refs = refsInText(text, links?.refs ?? prev.refs);
+        if (refs.length) next.refs = refs;
+        else delete next.refs;
+        let notifications: Record<ID, AppNotification> | undefined;
+        if (links?.mentions) {
+          const mentioned = [...new Set(links.mentions)].filter((p) => s.people[p]);
+          if (mentioned.length) next.mentions = mentioned;
+          else delete next.mentions;
+          // People mentioned for the first time hear about it, like in a new comment.
+          const target = prev.targetKind === 'item' ? s.items[prev.targetId] : s.docs[prev.targetId];
+          const excerpt = text.length > 160 ? `${text.slice(0, 157)}…` : text;
+          notifications = notifyAll(
+            s,
+            mentioned
+              .filter((p) => !prev.mentions?.includes(p))
+              .map((recipientId) => ({
+                kind: 'mention' as const,
+                recipientId,
+                targetKind: prev.targetKind,
+                targetId: prev.targetId,
+                projectId: target?.projectId,
+                text: excerpt,
+              })),
+            ts,
+          );
+        }
+        set((st) => ({ comments: { ...st.comments, [id]: next }, ...(notifications ? { notifications } : {}) }));
+      },
       deleteComment: (id) => set((s) => ({ comments: omit(s.comments, [id]) })),
+      toggleReaction: (id, emoji) =>
+        set((s) => {
+          const prev = s.comments[id];
+          if (!prev || !isReactionKey(emoji)) return {};
+          const reactions = toggleReactionIn(prev.reactions, emoji, s.meId);
+          if (reactions === prev.reactions) return {};
+          const next: Comment = { ...prev };
+          if (reactions) next.reactions = reactions;
+          else delete next.reactions;
+          return { comments: { ...s.comments, [id]: next } };
+        }),
 
       createSprint: (projectId, patch = {}) => {
         const s = get();

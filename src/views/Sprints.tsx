@@ -78,11 +78,11 @@ function CurrentSprint({ projectId, sprints, onPlan, onCreate }: { projectId: ID
     return (
       <EmptyState
         className="flex-1"
-        icon={<IterationCw size={40} strokeWidth={1.4} />}
+        illustration="workspace"
         title={t('sprint.noActive')}
         action={
           next ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
               <Button
                 variant="primary"
                 icon={<Play size={14} />}
@@ -597,7 +597,7 @@ function History({ sprints }: { sprints: Sprint[] }) {
   const data = velocity(sprints);
   const completed = sprints.filter((s) => s.status === 'completed');
   if (!completed.length) {
-    return <EmptyState className="flex-1" icon={<BarChart3 size={40} strokeWidth={1.4} />} title={t('sprint.noHistory')} />;
+    return <EmptyState className="flex-1" illustration="quiet" title={t('sprint.noHistory')} />;
   }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">

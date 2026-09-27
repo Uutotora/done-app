@@ -21,6 +21,7 @@ import { ProjectArchiveDialog } from './ProjectArchive';
 import { SidePeek } from './SidePeek';
 import { LinkDialog } from './files/LinkDialog';
 import { FilePreview } from './files/FilePreview';
+import { PageBoundary } from './PageFeedback';
 
 export function AppShell() {
   const location = useLocation();
@@ -85,7 +86,9 @@ export function AppShell() {
         <SyncNotice />
         <>
           <div key={sectionKey} className="flex min-h-0 flex-1 flex-col">
-            <Outlet />
+            <PageBoundary key={location.pathname}>
+              <Outlet />
+            </PageBoundary>
           </div>
         </>
       </main>

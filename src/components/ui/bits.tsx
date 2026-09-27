@@ -1,3 +1,4 @@
+import { StatePanel, type StateArtwork } from '@/components/StatePanel';
 import { motion } from 'motion/react';
 import {
   forwardRef,
@@ -271,18 +272,26 @@ export function Segmented<T extends string>({
 /* ------------------------------- Empty state ------------------------------- */
 
 export function EmptyState({
+  illustration,
   icon,
   title,
   children,
   action,
   className,
 }: {
+  illustration?: StateArtwork;
   icon?: ReactNode;
   title?: ReactNode;
   children?: ReactNode;
   action?: ReactNode;
   className?: string;
 }) {
+  if (illustration)
+    return (
+      <StatePanel illustration={illustration} title={title} action={action} className={className}>
+        {children}
+      </StatePanel>
+    );
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}

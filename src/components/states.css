@@ -1,0 +1,148 @@
+.state-illustration {
+  display: block;
+  width: 252px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+.dark .state-illustration {
+  filter: invert(1);
+}
+.state-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 24px;
+  text-align: center;
+  animation: state-arrive 240ms ease-out both;
+}
+.state-panel > .state-illustration {
+  margin-bottom: 20px;
+}
+.state-eyebrow {
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.state-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.state-description {
+  margin-top: 10px;
+  width: 100%;
+  max-width: 410px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.7;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+  max-width: 100%;
+}
+.state-footer {
+  margin-top: 24px;
+  max-width: 420px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.state-panel-page {
+  min-height: min(650px, 100%);
+  padding-block: clamp(36px, 7vh, 80px);
+}
+.state-panel-page > .state-illustration {
+  width: 350px;
+  margin-bottom: 24px;
+}
+.state-panel-page .state-title {
+  font-size: clamp(28px, 3vw, 36px);
+}
+.state-panel-compact {
+  padding: 24px 20px;
+}
+.state-panel-compact > .state-illustration {
+  width: 160px;
+  margin-bottom: 12px;
+}
+.state-panel-compact .state-title {
+  font-size: 16px;
+}
+.state-panel-compact .state-description {
+  font-size: 13px;
+}
+.state-primary,
+.state-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  transition:
+    background-color 150ms,
+    opacity 150ms;
+}
+.state-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: transparent;
+}
+.state-primary:hover {
+  opacity: 0.85;
+}
+.state-link:hover {
+  background: var(--bg-hover);
+}
+.state-primary:focus-visible,
+.state-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@keyframes state-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 540px) {
+  .state-panel {
+    padding-inline: 20px;
+  }
+  .state-panel-page > .state-illustration {
+    width: 280px;
+  }
+  .state-description {
+    font-size: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .state-panel {
+    animation: none;
+  }
+}

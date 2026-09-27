@@ -274,9 +274,9 @@ function BacklogTable({
 
   if (items.length === 0) {
     return (
-      <EmptyState icon="📋" title={t('backlog.title')}>
+      <EmptyState illustration="workspace" title={t('backlog.title')}>
         {t('backlog.empty')}
-        <div className="mt-6 w-[420px] text-left">
+        <div className="mt-6 w-full max-w-[420px] text-left">
           <NewRow projectId={projectId} patch={{}} depth={0} autoFocus />
         </div>
       </EmptyState>

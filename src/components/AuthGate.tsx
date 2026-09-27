@@ -4,7 +4,8 @@ import { api, bootstrapAuth, dismissSignedOut, enterAccount, enterLocal, useAuth
 import { createEmptyData, useData } from '@/lib/store';
 import { useLang } from '@/lib/i18n';
 import { Logo, Splash } from './Logo';
-import { Button } from './ui/Button';
+import { Button, Spinner } from './ui/Button';
+import { StateIllustration } from './StatePanel';
 import { ForgotPassword, ResetPassword } from './AuthRecovery';
 import { WelcomeHeading } from './WelcomeHeading';
 import { AuthArtwork } from './AuthArtwork';
@@ -201,8 +202,9 @@ function AuthPage() {
       viewer: ru ? 'Наблюдатель' : 'Viewer',
     } as Record<string, string>
   )[invitation?.role || ''];
+  const illustrated = ['join', 'checking', 'invalid', 'forgot', 'reset'].includes(step);
   return (
-    <main className="auth-shell">
+    <main className={`auth-shell ${illustrated ? 'auth-shell-illustrated' : ''}`}>
       <div className="auth-glow auth-glow-blue" aria-hidden="true" />
       <div className="auth-glow auth-glow-gold" aria-hidden="true" />
       <Logo size={32} className="auth-brand" />
@@ -213,12 +215,29 @@ function AuthPage() {
           </button>
         ))}
       </nav>
-      <div className={`auth-stage ${step === 'welcome' && !showSignedOut ? 'auth-stage-welcome' : ''}`}>
+      <div
+        className={`auth-stage ${step === 'welcome' && !showSignedOut ? 'auth-stage-welcome' : ''} ${step === 'join' ? 'auth-stage-invitation' : ''}`}
+      >
         {step === 'welcome' && !showSignedOut ? (
           <>
             <AuthWelcomeOrnaments />
             <AuthArtwork />
           </>
+        ) : illustrated ? (
+          <aside className={`auth-state-art ${step === 'join' ? 'auth-invitation-story' : ''}`}>
+            <StateIllustration scene={step === 'join' || step === 'checking' ? 'team' : 'letter'} />
+            {step === 'join' && (
+              <div className="auth-story-copy">
+                <p className="state-eyebrow">{ru ? 'Вместе получается больше' : 'Better, together'}</p>
+                <h2>{ru ? 'Хорошие идеи. Ваша команда.' : 'Good ideas. Your people.'}</h2>
+                <p>
+                  {ru
+                    ? 'Задачи, планы и решения — в одном пространстве. Не хватает только вас.'
+                    : 'Tasks, plans, and decisions, all in one workspace. All that’s missing is you.'}
+                </p>
+              </div>
+            )}
+          </aside>
         ) : (
           <AuthStationery />
         )}
@@ -307,7 +326,8 @@ function AuthPage() {
         ) : step === 'reset' ? (
           <ResetPassword ru={ru} token={resetToken} onForgot={() => leaveLink('forgot')} onSignIn={() => leaveLink('welcome')} />
         ) : step === 'checking' ? (
-          <section className="auth-card auth-checking">
+          <section className="auth-card auth-checking auth-state-card" aria-busy="true">
+            <Spinner className="mx-auto mb-4" />
             <h1 ref={heading} tabIndex={-1}>
               {ru ? 'Открываем приглашение…' : 'Opening your invitation…'}
             </h1>
@@ -316,8 +336,8 @@ function AuthPage() {
             </p>
           </section>
         ) : step === 'invalid' ? (
-          <section className="auth-card">
-            <Mail size={28} className="mb-6 text-fg-3" />
+          <section className="auth-card auth-state-card">
+            <p className="state-eyebrow">{ru ? 'Приглашение в Done' : 'Your Done invitation'}</p>
             <h1 ref={heading} tabIndex={-1}>
               {error === 'network'
                 ? ru
@@ -333,20 +353,23 @@ function AuthPage() {
                   ? 'Проверьте подключение и попробуйте ещё раз.'
                   : 'Check your connection and try again.'
                 : ru
-                  ? 'Возможно, приглашение принято, отозвано или прошло 7 дней. Если аккаунт уже создан, войдите. Иначе попросите администратора отправить новую ссылку.'
-                  : 'It may have been accepted, revoked, or expired after 7 days. Sign in if you already joined, or ask your administrator for a new link.'}
+                  ? 'Приглашение уже принято, отозвано или срок его действия истёк. Попросите того, кто вас пригласил, отправить новую ссылку.'
+                  : 'The invitation was accepted, revoked, or has expired. Ask the person who invited you to send a fresh link.'}
             </p>
             {error === 'network' && (
               <Button className="auth-submit mb-3" onClick={() => setRetry((v) => v + 1)}>
                 {ru ? 'Повторить' : 'Retry'}
               </Button>
             )}
-            <Button className="auth-submit" onClick={() => leaveLink('welcome')}>
+            <Button className={error === 'network' ? 'mt-2 w-full' : 'auth-submit'} onClick={() => leaveLink('welcome')}>
               {ru ? 'Перейти ко входу' : 'Go to sign in'}
             </Button>
+            {error !== 'network' && (
+              <p className="auth-caption">{ru ? 'Уже присоединились? Войдите с рабочей почтой.' : 'Already joined? Sign in with your work email.'}</p>
+            )}
           </section>
         ) : (
-          <section className="auth-card">
+          <section className={`auth-card ${invitation ? 'auth-join-card' : ''}`}>
             <button type="button" className="auth-back" disabled={busy} onClick={() => (invitation ? leaveLink('welcome') : changeStep('welcome'))}>
               <ArrowLeft size={15} />
               {ru ? 'Назад' : 'Back'}

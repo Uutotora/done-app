@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, KeyRound, Mail, MailCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, enterAccount, useAuth, type AuthUser } from '@/lib/auth';
 import { toast } from '@/lib/ui';
@@ -36,16 +36,14 @@ export function ForgotPassword({ ru, initialEmail, onBack }: { ru: boolean; init
     }
   }
   return (
-    <div key={sent ? 'forgot-sent' : 'forgot'} className="auth-card">
+    <div key={sent ? 'forgot-sent' : 'forgot'} className="auth-card auth-recovery-card">
       <button onClick={() => onBack(email)} className="mb-7 flex items-center gap-1 rounded px-1 py-1 text-[13px] text-fg-3 hover:bg-hover">
         <ArrowLeft size={14} />
         {ru ? 'Ко входу' : 'Back to sign in'}
       </button>
       {sent ? (
         <>
-          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--c-green-bg)] text-[var(--c-green-text)]">
-            <MailCheck size={22} />
-          </span>
+          <p className="state-eyebrow">{ru ? 'Ещё один шаг' : 'One more step'}</p>
           <h1 className="text-[28px] font-bold leading-tight tracking-tight">{ru ? 'Проверьте почту' : 'Check your email'}</h1>
           <p className="mt-3 text-[14px] leading-relaxed text-fg-2">
             {ru
@@ -119,7 +117,8 @@ export function ForgotPassword({ ru, initialEmail, onBack }: { ru: boolean; init
 
 /** The page behind a reset link: a new password (twice), then the person is signed in. */
 export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; token: string; onForgot: () => void; onSignIn: () => void }) {
-  const [state, setState] = useState<'checking' | 'ready' | 'invalid'>('checking');
+  const [state, setState] = useState<'checking' | 'ready' | 'invalid' | 'unavailable'>('checking');
+  const [retry, setRetry] = useState(0);
   const [account, setAccount] = useState<{ email: string; name: string } | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -128,6 +127,8 @@ export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; 
   const tooMany = ru ? 'Слишком много попыток. Попробуйте через 15 минут.' : 'Too many attempts. Try again in 15 minutes.';
   useEffect(() => {
     let alive = true;
+    setState('checking');
+    setError('');
     api<{ email: string; name: string }>('/api/auth/reset/check', 'POST', { token })
       .then((result) => {
         if (!alive) return;
@@ -136,15 +137,22 @@ export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; 
       })
       .catch((e: Error & { status?: number }) => {
         if (!alive) return;
-        if (e.status === 429) {
-          setError(tooMany);
-          setState('ready');
-        } else setState('invalid');
+        if (e.status === 410) setState('invalid');
+        else {
+          setError(
+            e.status === 429
+              ? tooMany
+              : ru
+                ? 'Проверьте подключение и попробуйте ещё раз. Ваша ссылка может быть в порядке.'
+                : 'Check your connection and try again. Your link may still be valid.',
+          );
+          setState('unavailable');
+        }
       });
     return () => {
       alive = false;
     };
-  }, [token, tooMany]);
+  }, [token, tooMany, ru, retry]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -168,14 +176,27 @@ export function ResetPassword({ ru, token, onForgot, onSignIn }: { ru: boolean; 
     }
   }
   return (
-    <div key={`reset-${state}`} className="auth-card">
+    <div key={`reset-${state}`} className="auth-card auth-recovery-card">
       {state === 'checking' ? (
-        <p className="text-center text-[14px] text-fg-3">{ru ? 'Проверяем ссылку…' : 'Checking the link…'}</p>
+        <p role="status" className="text-center text-[14px] text-fg-3">
+          {ru ? 'Проверяем ссылку…' : 'Checking the link…'}
+        </p>
+      ) : state === 'unavailable' ? (
+        <>
+          <h1>{ru ? 'Не удалось проверить ссылку' : 'Couldn’t check this link'}</h1>
+          <p role="alert" className="auth-description">
+            {error}
+          </p>
+          <Button className="auth-submit" onClick={() => setRetry((value) => value + 1)}>
+            {ru ? 'Повторить' : 'Try again'}
+          </Button>
+          <button className="mt-4 w-full text-[13px] text-fg-2" onClick={onSignIn}>
+            {ru ? 'Вернуться ко входу' : 'Back to sign in'}
+          </button>
+        </>
       ) : state === 'invalid' ? (
         <>
-          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--c-red-bg)] text-[var(--c-red-text)]">
-            <KeyRound size={21} />
-          </span>
+          <p className="state-eyebrow">{ru ? 'Давайте попробуем снова' : 'Let’s try again'}</p>
           <h1 className="text-[28px] font-bold leading-tight tracking-tight">{ru ? 'Ссылка больше не работает' : 'This link no longer works'}</h1>
           <p className="mt-3 text-[14px] leading-relaxed text-fg-2">
             {ru

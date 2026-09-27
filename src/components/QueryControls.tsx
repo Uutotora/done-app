@@ -263,6 +263,7 @@ export function SearchToggle({ value, onChange }: { value: string; onChange: (v:
     <div className="flex items-center">
       <BarButton
         icon={<Search size={15} />}
+        aria-label={t('filter.search')}
         active={!!value}
         onClick={() => {
           setOpen(true);
@@ -287,6 +288,8 @@ export function SearchToggle({ value, onChange }: { value: string; onChange: (v:
             }
           }}
           placeholder={t('filter.search')}
+          aria-label={t('filter.search')}
+          tabIndex={open ? 0 : -1}
           className="h-7 w-[176px] bg-transparent px-1 text-[14px] outline-none"
         />
       </motion.div>

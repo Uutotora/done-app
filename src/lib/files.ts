@@ -1,5 +1,6 @@
 import { useData } from './store';
-import { putFileBlob, syncFileBlob, isRemoteStorage } from './storage';
+import { MAX_UPLOAD_MB, UploadError, putFileBlob, syncFileBlob, isRemoteStorage } from './storage';
+import type { TFunction } from './i18n';
 import type { FileNode, ID } from './types';
 import { nowIso, uid } from './utils';
 
@@ -93,10 +94,11 @@ export async function uploadFiles(files: File[], opts: { projectId?: ID; parentI
   if (isRemoteStorage()) {
     const { canEditProject } = await import('./auth');
     if (!canEditProject(opts.projectId)) throw new Error('Read-only access');
+    // Checked before anything is sent, so a large file does not leave half of a batch uploaded.
+    if (files.some((file) => file.size > MAX_UPLOAD_MB * 1024 * 1024)) throw new UploadError('too_large', MAX_UPLOAD_MB);
   }
   const ids: ID[] = [];
   for (const file of files) {
-    if (isRemoteStorage() && file.size > 20 * 1024 * 1024) throw new Error('Maximum shared file size is 20 MB');
     const id = uid('f');
     if (!isRemoteStorage()) await putFileBlob(id, file);
     const ts = nowIso();
@@ -121,6 +123,13 @@ export async function uploadFiles(files: File[], opts: { projectId?: ID; parentI
     ids.push(id);
   }
   return ids;
+}
+
+/** A short explanation of a failed upload, for a toast. */
+export function uploadErrorText(error: unknown, t: TFunction): string {
+  if (error instanceof UploadError && error.problem === 'too_large') return t('files.tooLarge', { n: error.maxMb ?? MAX_UPLOAD_MB });
+  if (error instanceof UploadError && error.problem === 'unsaved') return t('files.uploadUnsaved');
+  return t('files.uploadFailed');
 }
 
 /** Folder chain from the drive root down to `folderId`. */

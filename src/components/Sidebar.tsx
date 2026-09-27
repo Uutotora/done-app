@@ -1,5 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  Archive,
+  ArchiveRestore,
   CalendarDays,
   ChartGantt,
   ChevronRight,
@@ -37,12 +39,14 @@ import { usePresence } from '@/lib/presence';
 import { useT, type TKey } from '@/lib/i18n';
 import { cn, modKey } from '@/lib/utils';
 import { useMediaQuery } from '@/lib/hooks';
-import { deleteDocWithUndo, deleteGroupWithUndo, deleteProjectWithUndo } from '@/lib/actions';
+import { archiveProjectWithUndo, deleteDocWithUndo, deleteGroupWithUndo, deleteProjectWithUndo, restoreArchivedProject } from '@/lib/actions';
+import { refInArchive } from '@/lib/archive';
 import { Avatar, Kbd, PageIcon } from './ui/bits';
 import { ContextMenu, EntriesMenu, Tooltip, type MenuEntry } from './ui/Overlay';
 import { IconPicker } from './pickers/IconPicker';
 import { WorkspaceBar } from './AccountStatus';
 import { TrashButton } from './Trash';
+import { ArchiveButton } from './ProjectArchive';
 import { SIDEBAR_ICON_BUTTON, sidebarRow } from './sidebarStyles';
 import type { Doc, ID, Project, ProjectGroup, Ref } from '@/lib/types';
 
@@ -232,6 +236,13 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
         .sort((a, b) => a.order - b.order),
     [docs],
   );
+  // Shortcuts into archived projects stay saved but are hidden until the project comes back.
+  const shown = useCallback(
+    (ref: Ref) => (ref.kind === 'project' ? !!projectsRec[ref.id] : !!docs[ref.id]) && !refInArchive(ref, { projects: projectsRec, docs }),
+    [projectsRec, docs],
+  );
+  const recentShown = useMemo(() => recent.filter(shown).slice(0, 5), [recent, shown]);
+  const favoritesShown = useMemo(() => favorites.filter(shown), [favorites, shown]);
 
   const canCreate = useCanCreateProjects();
   const admin = useAuth((s) => s.mode !== 'signedIn' || isAdmin(s.user));
@@ -314,16 +325,16 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
         <NavRow to="/roadmap" icon={<ChartGantt size={18} strokeWidth={1.7} />} label={t('nav.roadmap')} />
         <NavRow to="/files" icon={<FolderOpen size={18} strokeWidth={1.7} />} label={t('nav.files')} />
 
-        {recent.length > 0 && (
+        {recentShown.length > 0 && (
           <Section id="recent" title={t('nav.recent')}>
-            {recent.slice(0, 5).map((ref) => (
+            {recentShown.map((ref) => (
               <RefRow key={`${ref.kind}:${ref.id}`} refItem={ref} scope="recent" onAddChild={newPage} />
             ))}
           </Section>
         )}
-        {favorites.length > 0 && (
+        {favoritesShown.length > 0 && (
           <Section id="favorites" title={t('nav.favorites')}>
-            {favorites.map((ref) => (
+            {favoritesShown.map((ref) => (
               <RefRow key={`${ref.kind}:${ref.id}`} refItem={ref} scope="fav" onAddChild={newPage} />
             ))}
           </Section>
@@ -359,6 +370,7 @@ function SidebarBody({ width, floating }: { width: number; floating?: boolean })
         </Section>
 
         <div className="mt-4">
+          <ArchiveButton />
           <TrashButton />
           <NavLink to="/settings/plane" className={({ isActive }) => sidebarRow(isActive)} style={{ paddingLeft: 8 }}>
             <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center">
@@ -819,6 +831,17 @@ function ProjectRow({ project, depth = 0, scope = 'tree' }: { project: Project; 
           })),
       ],
     });
+  if (canEdit)
+    entries.push(
+      project.archived
+        ? {
+            key: 'unarchive',
+            icon: <ArchiveRestore size={15} />,
+            label: t('project.unarchive'),
+            onSelect: () => restoreArchivedProject(project.id),
+          }
+        : { key: 'archive', icon: <Archive size={15} />, label: t('project.archive'), onSelect: () => archiveProjectWithUndo(project.id) },
+    );
   if (canDelete)
     entries.push(
       { key: 's', separator: true },

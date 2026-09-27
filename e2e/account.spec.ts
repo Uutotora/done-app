@@ -152,6 +152,12 @@ test('teammates see mentions live in their inbox and each other on the page', as
   await member.goto(`/p/${projectId}/overview`);
   await owner.goto(`/p/${projectId}/overview`);
   await expect(owner.locator('header').getByTitle('Мира')).toBeVisible({ timeout: 10_000 });
+
+  // Live editing: the owner types in the project brief and the teammate's open editor shows it without a reload.
+  const ownerBrief = owner.locator('.done-editor [contenteditable="true"]').first();
+  await ownerBrief.click();
+  await owner.keyboard.type('Живая правка брифа');
+  await expect(member.locator('.done-editor').first()).toContainText('Живая правка брифа', { timeout: 10_000 });
   expect(errors).toEqual([]);
   await memberContext.close();
   await ownerContext.close();

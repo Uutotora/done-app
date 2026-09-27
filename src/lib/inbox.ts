@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useData } from './store';
 import { translate } from './i18n';
+import { formatAxisDate, todayISO } from './dates';
 import type { AppNotification, DataState, ItemType, Lang } from './types';
 
 /** Notifications addressed to the current member, newest first. */
@@ -60,6 +61,18 @@ export function notificationTarget(n: AppNotification, s: DataState, lang: Lang)
     : { title: translate(lang, 'inbox.deleted'), exists: false, path: '/inbox' };
 }
 
+/** Due date reminders come from the app itself, not from a teammate. */
+export const isReminder = (n: Pick<AppNotification, 'kind'>) => n.kind === 'due' || n.kind === 'overdue';
+
+/** Title and optional detail of a due date reminder, e.g. "Overdue" and "was due 12 Sep". */
+export function reminderLabel(n: AppNotification, lang: Lang, today = todayISO()): { title: string; detail?: string } {
+  const due = n.text && /^\d{4}-\d{2}-\d{2}$/.test(n.text) ? n.text : undefined;
+  const date = due ? formatAxisDate(due, lang) : '';
+  if (n.kind === 'overdue')
+    return { title: translate(lang, 'inbox.kind.overdue'), detail: date ? translate(lang, 'inbox.overdueSince', { date }) : undefined };
+  return { title: !due || due === today ? translate(lang, 'inbox.kind.due') : translate(lang, 'inbox.kind.dueWas', { date }) };
+}
+
 /** Short sentence for the notification without the actor, e.g. "Assigned you". */
 export function notificationHeadline(n: AppNotification, lang: Lang): string {
   switch (n.kind) {
@@ -75,5 +88,10 @@ export function notificationHeadline(n: AppNotification, lang: Lang): string {
       });
     case 'sprint':
       return translate(lang, 'inbox.kind.sprint', { name: n.text ?? '' });
+    case 'due':
+    case 'overdue': {
+      const label = reminderLabel(n, lang);
+      return label.detail ? `${label.title} · ${label.detail}` : label.title;
+    }
   }
 }

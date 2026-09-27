@@ -107,6 +107,8 @@ export interface Actions {
   moveProject: (id: ID, groupId: ID | undefined, beforeId?: ID) => void;
   duplicateProject: (id: ID) => ID | undefined;
   deleteProject: (id: ID) => Snapshot;
+  /** Moves a project to the archive (hidden from day-to-day lists) or brings it back. */
+  setProjectArchived: (id: ID, archived: boolean) => void;
 
   createItem: (item: NewItem) => ID;
   updateItem: (id: ID, patch: Partial<Item>) => void;
@@ -143,6 +145,8 @@ export interface Actions {
 
   markNotifications: (ids: ID[], read: boolean) => void;
   archiveNotifications: (ids: ID[], archived: boolean) => void;
+  /** Stores due date reminders for the current member and marks stale ones read (see lib/reminders). */
+  addReminders: (add: AppNotification[], read?: ID[]) => void;
 
   pushTrash: (kind: TrashKind, title: string, icon: string | undefined, snapshot: Snapshot) => ID;
   restoreTrash: (entryId: ID) => void;
@@ -395,6 +399,9 @@ export const useData = create<Store>()(
           ...cloneable(src),
           name: `${src.name} (${s.prefs.lang === 'ru' ? 'копия' : 'copy'})`,
           plane: undefined,
+          // A copy starts in use even when the original sits in the archive.
+          archived: undefined,
+          archivedAt: undefined,
         });
         // Copy items preserving the hierarchy.
         const idMap = new Map<ID, ID>();
@@ -456,6 +463,21 @@ export const useData = create<Store>()(
         });
         return snap;
       },
+      setProjectArchived: (id, archived) =>
+        set((s) => {
+          const prev = s.projects[id];
+          if (!prev || !!prev.archived === archived) return {};
+          const ts = nowIso();
+          const next: Project = { ...prev, updatedAt: ts };
+          if (archived) {
+            next.archived = true;
+            next.archivedAt = ts;
+          } else {
+            delete next.archived;
+            delete next.archivedAt;
+          }
+          return { projects: { ...s.projects, [id]: next } };
+        }),
 
       createItem: (input) => {
         const id = uid('it');
@@ -879,6 +901,25 @@ export const useData = create<Store>()(
             notifications[id] = next;
           }
           return { notifications };
+        }),
+      addReminders: (add, read = []) =>
+        set((s) => {
+          const ts = nowIso();
+          const notifications = { ...s.notifications };
+          let changed = false;
+          for (const n of add) {
+            // Reminders are written by their recipient only, and never twice.
+            if ((n.kind !== 'due' && n.kind !== 'overdue') || n.recipientId !== s.meId || n.actorId !== s.meId || notifications[n.id]) continue;
+            notifications[n.id] = n;
+            changed = true;
+          }
+          for (const id of read) {
+            const n = notifications[id];
+            if (!n || n.recipientId !== s.meId || n.readAt) continue;
+            notifications[id] = { ...n, readAt: ts };
+            changed = true;
+          }
+          return changed ? { notifications } : {};
         }),
 
       pushTrash: (kind, title, icon, snapshot) => {

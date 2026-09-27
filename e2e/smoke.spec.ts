@@ -1,9 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) => {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-
+/** Opens the demo workspace through onboarding and waits for Home. */
+async function startDemo(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Попробовать демо' }).click();
   await page.getByRole('button', { name: 'Начать' }).click();
@@ -15,6 +13,13 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
   await page.getByRole('button', { name: 'Поехали' }).click();
 
   await expect(page.getByRole('heading', { name: /Тест/ })).toBeVisible();
+}
+
+test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startDemo(page);
 
   // Quick create with the keyboard.
   await page.keyboard.press('c');
@@ -29,7 +34,9 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
 
   // Backlog: open an item in the side peek.
   await page.getByRole('main').getByRole('link', { name: 'Бэклог' }).click();
-  const row = page.locator('[data-peek-keep]', { hasText: 'Регистрация по номеру телефона' }).first();
+  // A backlog row has a checkbox; this skips the roadmap bar of the same task while the page transition runs.
+  const row = page.locator('[data-peek-keep]', { hasText: 'Регистрация по номеру телефона', has: page.getByRole('checkbox') }).first();
+  // The row's buttons render only on hover, so hover the row itself, not the leaving roadmap.
   await row.hover();
   await row.getByRole('button', { name: 'Открыть' }).click();
   await expect(page.getByRole('complementary').getByText('Критерии готовности')).toBeVisible({ timeout: 10_000 });
@@ -84,6 +91,10 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
     .getByRole('link', { name: /Входящие/ })
     .click();
   await expect(page.getByText('Вас упомянули')).toBeVisible();
+  // The demo has a task of mine due today, so its reminder is in the inbox too.
+  await expect(page.locator('[data-index]', { hasText: 'Собрать метрики воронки регистрации' }).getByText('Срок сегодня')).toBeVisible();
+  // Reminders are newer than the mention, so point at the mention before archiving it with E.
+  await page.locator('[data-index]', { hasText: 'Вас упомянули' }).hover();
   await page.keyboard.press('e');
   await expect(page.getByText('Вас упомянули')).toHaveCount(0);
 
@@ -106,5 +117,28 @@ test('onboarding, tasks, roadmap, files and trash', async ({ page }, testInfo) =
   await expect(page.getByRole('heading', { name: /Тест/ }).locator('..')).toHaveCSS('opacity', '1');
   await page.screenshot({ path: testInfo.outputPath('mobile-home.png'), animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('archive a project and bring it back', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await startDemo(page);
+
+  const sidebar = page.getByRole('complementary', { name: 'Проекты', exact: true });
+  const project = sidebar.getByRole('link', { name: 'Исследование рынка Q4' });
+  await project.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Архивировать' }).click();
+  await expect(page.getByText('Проект «Исследование рынка Q4» перемещен в архив')).toBeVisible();
+  await expect(project).toHaveCount(0);
+
+  await sidebar.getByRole('button', { name: /^Архив/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Архив проектов' });
+  await expect(dialog.getByText('Исследование рынка Q4')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Вернуть из архива' }).click();
+  await expect(page.getByText('Проект «Исследование рынка Q4» возвращен из архива')).toBeVisible();
+  await expect(dialog.getByText('В архиве пока пусто')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(project).toBeVisible();
   expect(errors).toEqual([]);
 });

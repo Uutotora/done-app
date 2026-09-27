@@ -112,17 +112,81 @@ export async function getFileUrl(id: string): Promise<string | undefined> {
   return url;
 }
 
+const MB = 1024 * 1024;
+/** Largest shared file the interface uploads; the server default for DONE_MAX_UPLOAD_MB is the same. */
+export const MAX_UPLOAD_MB = 100;
+/** Images and files inserted into pages, tasks and project briefs (EDITOR_UPLOAD_MB on the server). */
+export const MAX_EDITOR_UPLOAD_MB = 20;
+/** Pages in the local demo keep their images inline, so they stay small. */
+export const MAX_INLINE_UPLOAD_MB = 3;
+
+export type UploadProblem = 'too_large' | 'unsaved' | 'failed';
+/** Why an upload did not go through, with the size limit when the file was too large. */
+export class UploadError extends Error {
+  readonly problem: UploadProblem;
+  readonly maxMb?: number;
+  constructor(problem: UploadProblem, maxMb?: number, message?: string) {
+    super(message ?? (problem === 'too_large' ? `The file is larger than ${maxMb} MB` : 'Upload failed'));
+    this.name = 'UploadError';
+    this.problem = problem;
+    this.maxMb = maxMb;
+  }
+}
+
+async function uploadFailure(response: Response, maxMb: number): Promise<Error> {
+  const result = (await response.json().catch(() => ({}))) as { error?: string; maxMb?: number };
+  if (response.status === 413) return new UploadError('too_large', Number(result.maxMb) > 0 ? Number(result.maxMb) : maxMb);
+  return Object.assign(new UploadError('failed', undefined, result.error || 'Upload failed'), { status: response.status });
+}
+
+/** Headers for uploads whose body is the file itself; x-done-client is the server's CSRF check. */
+const uploadHeaders = (type: string) => ({ 'content-type': type, 'x-done-client': 'web' });
+
+const storedListeners = new Set<(id: string) => void>();
+/** Calls `listener` with the id of each shared file whose bytes this tab has just sent, e.g. to show its thumbnail. */
+export function onFileStored(listener: (id: string) => void): () => void {
+  storedListeners.add(listener);
+  return () => void storedListeners.delete(listener);
+}
+
+/** Sends the bytes of a shared file after its record was saved, streamed as they are. */
 export async function syncFileBlob(id: string, blob: Blob): Promise<void> {
   if (!remoteStorage) return;
-  if (blob.size > 20 * 1024 * 1024) throw new Error('Maximum shared file size is 20 MB');
-  const { api, flushWorkspace, useAuth } = await import('./auth');
+  if (blob.size > MAX_UPLOAD_MB * MB) throw new UploadError('too_large', MAX_UPLOAD_MB);
+  const { flushWorkspace, useAuth } = await import('./auth');
+  // The server accepts bytes only for a file record it already has.
   await flushWorkspace();
-  if (useAuth.getState().sync !== 'saved') throw new Error('Save the workspace before uploading files');
-  const base64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1]);
-    reader.onerror = () => reject(new Error('Cannot read file'));
-    reader.readAsDataURL(blob);
+  if (useAuth.getState().sync !== 'saved') throw new UploadError('unsaved');
+  const response = await fetch(`/api/blobs/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: uploadHeaders('application/octet-stream'),
+    body: blob,
   });
-  await api(`/api/blobs/${encodeURIComponent(id)}`, 'PUT', { base64 });
+  if (!response.ok) throw await uploadFailure(response, MAX_UPLOAD_MB);
+  for (const listener of storedListeners) listener(id);
+}
+
+/**
+ * Uploads an image or file inserted into a page, task or project brief and returns its address.
+ * `projectId` is where the text lives; pages outside projects belong to the workspace.
+ */
+export async function uploadEditorFile(file: File, projectId?: string): Promise<string> {
+  if (file.size > MAX_EDITOR_UPLOAD_MB * MB) throw new UploadError('too_large', MAX_EDITOR_UPLOAD_MB);
+  // A project created a moment ago has to reach the server first.
+  const { flushWorkspace } = await import('./auth');
+  await flushWorkspace();
+  const response = await fetch(`/api/uploads?scope=${encodeURIComponent(projectId || 'workspace')}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      ...uploadHeaders(file.type || 'application/octet-stream'),
+      ...(file.name ? { 'x-done-file-name': encodeURIComponent(file.name) } : {}),
+    },
+    body: file,
+  });
+  if (!response.ok) throw await uploadFailure(response, MAX_EDITOR_UPLOAD_MB);
+  const { url } = (await response.json()) as { url?: unknown };
+  if (typeof url !== 'string' || !url.startsWith('/api/uploads/')) throw new UploadError('failed');
+  return url;
 }

@@ -1,17 +1,21 @@
 import type { Lang } from './types';
+import { uid } from './utils';
 
-/** Tiny helpers to build BlockNote documents (PartialBlock JSON). */
+/**
+ * Tiny helpers to build BlockNote documents (PartialBlock JSON). Every block gets its own id right
+ * away, so teammates editing a page made from a template are merged block by block from the start.
+ */
 export const B = {
-  h1: (text: string) => ({ type: 'heading', props: { level: 1 }, content: text }),
-  h2: (text: string) => ({ type: 'heading', props: { level: 2 }, content: text }),
-  h3: (text: string) => ({ type: 'heading', props: { level: 3 }, content: text }),
-  p: (text = '') => ({ type: 'paragraph', content: text }),
-  li: (text: string) => ({ type: 'bulletListItem', content: text }),
-  ol: (text: string) => ({ type: 'numberedListItem', content: text }),
-  todo: (text: string, checked = false) => ({ type: 'checkListItem', props: { checked }, content: text }),
-  quote: (text: string) => ({ type: 'quote', content: text }),
-  bold: (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text, styles: { bold: true } }] }),
-  muted: (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text, styles: { textColor: 'gray' } }] }),
+  h1: (text: string) => ({ id: uid(), type: 'heading', props: { level: 1 }, content: text }),
+  h2: (text: string) => ({ id: uid(), type: 'heading', props: { level: 2 }, content: text }),
+  h3: (text: string) => ({ id: uid(), type: 'heading', props: { level: 3 }, content: text }),
+  p: (text = '') => ({ id: uid(), type: 'paragraph', content: text }),
+  li: (text: string) => ({ id: uid(), type: 'bulletListItem', content: text }),
+  ol: (text: string) => ({ id: uid(), type: 'numberedListItem', content: text }),
+  todo: (text: string, checked = false) => ({ id: uid(), type: 'checkListItem', props: { checked }, content: text }),
+  quote: (text: string) => ({ id: uid(), type: 'quote', content: text }),
+  bold: (text: string) => ({ id: uid(), type: 'paragraph', content: [{ type: 'text', text, styles: { bold: true } }] }),
+  muted: (text: string) => ({ id: uid(), type: 'paragraph', content: [{ type: 'text', text, styles: { textColor: 'gray' } }] }),
 };
 
 export type TemplateId = 'prd' | 'brief' | 'retro' | 'release' | 'oneOnOne' | 'decision';

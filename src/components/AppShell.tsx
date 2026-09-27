@@ -5,7 +5,9 @@ import { useData } from '@/lib/store';
 import { useUI } from '@/lib/ui';
 import { useHotkey, useIsDark } from '@/lib/hooks';
 import { reportPresence, useAuth } from '@/lib/auth';
-import { notificationHeadline, notificationTarget, unreadCount } from '@/lib/inbox';
+import { isReminder, notificationHeadline, notificationTarget } from '@/lib/inbox';
+import { useReminders } from '@/lib/reminders';
+import { useDocumentTitle } from '@/lib/documentTitle';
 import { toast } from '@/lib/ui';
 import { isEditableTarget } from '@/lib/utils';
 import { SyncNotice } from './AccountStatus';
@@ -15,6 +17,7 @@ import { Celebration } from './Celebration';
 import { CommandPalette } from './CommandPalette';
 import { CreateItemDialog } from './CreateItemDialog';
 import { ShortcutsDialog } from './ShortcutsDialog';
+import { ProjectArchiveDialog } from './ProjectArchive';
 import { SidePeek } from './SidePeek';
 import { LinkDialog } from './files/LinkDialog';
 import { FilePreview } from './files/FilePreview';
@@ -66,6 +69,8 @@ export function AppShell() {
   useGoTo();
 
   useInboxSignals();
+  useReminders();
+  useDocumentTitle();
 
   // Page-level transitions keyed by the section, so switching project tabs feels calm.
   const sectionKey = location.pathname.split('/').slice(0, 3).join('/');
@@ -88,6 +93,7 @@ export function AppShell() {
       <CommandPalette />
       <CreateItemDialog />
       <ShortcutsDialog />
+      <ProjectArchiveDialog />
       <LinkDialog />
       <FilePreview />
       <Toaster />
@@ -96,13 +102,9 @@ export function AppShell() {
   );
 }
 
-/** Unread count in the tab title, and a toast when a teammate's update arrives live. */
+/** A toast when a teammate's update arrives live. The unread count in the tab title comes from useDocumentTitle. */
 function useInboxSignals() {
   const navigate = useNavigate();
-  const unread = useData(unreadCount);
-  useEffect(() => {
-    document.title = unread ? `(${unread}) Done` : 'Done';
-  }, [unread]);
   useEffect(() => {
     const mine = (s: ReturnType<typeof useData.getState>) =>
       Object.values(s.notifications).filter((n) => n.recipientId === s.meId && !n.readAt && !n.archivedAt);
@@ -111,21 +113,37 @@ function useInboxSignals() {
       const current = mine(s);
       const fresh = current.filter((n) => !known.has(n.id));
       known = new Set(current.map((n) => n.id));
-      if (!fresh.length || useAuth.getState().mode !== 'signedIn') return;
-      const n = fresh.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (!fresh.length) return;
       const lang = s.prefs.lang;
+      const openAction = (n: (typeof fresh)[number], target: ReturnType<typeof notificationTarget>) => ({
+        label: translate(lang, 'inbox.open'),
+        run: () => {
+          useData.getState().markNotifications([n.id], true);
+          if (target.peekItemId) useUI.getState().openPeek(target.peekItemId);
+          else navigate(target.path);
+        },
+      });
+      // Due date reminders are written by this browser, in the demo too, and carry no teammate's name.
+      // Another device may still write them while they are turned off here: keep those quiet.
+      const reminders = s.prefs.reminders === false ? [] : fresh.filter(isReminder);
+      if (reminders.length === 1) {
+        const target = notificationTarget(reminders[0], s, lang);
+        toast({ message: `${notificationHeadline(reminders[0], lang)} · ${target.title}`, duration: 6000, action: openAction(reminders[0], target) });
+      } else if (reminders.length > 1) {
+        toast({
+          message: translate(lang, 'inbox.reminders', { n: reminders.length }),
+          duration: 6000,
+          action: { label: translate(lang, 'inbox.open'), run: () => navigate('/inbox') },
+        });
+      }
+      const updates = fresh.filter((n) => !isReminder(n));
+      if (!updates.length || useAuth.getState().mode !== 'signedIn') return;
+      const n = updates.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       const target = notificationTarget(n, s, lang);
       toast({
         message: `${s.people[n.actorId]?.name ?? ''}: ${notificationHeadline(n, lang)} · ${target.title}`,
         duration: 6000,
-        action: {
-          label: translate(lang, 'inbox.open'),
-          run: () => {
-            useData.getState().markNotifications([n.id], true);
-            if (target.peekItemId) useUI.getState().openPeek(target.peekItemId);
-            else navigate(target.path);
-          },
-        },
+        action: openAction(n, target),
       });
     });
   }, [navigate]);

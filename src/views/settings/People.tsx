@@ -580,7 +580,8 @@ function InvitesList({ invites, act }: { invites: PendingInvite[]; act: (work: (
 
 function ProjectsAccess({ members }: { members: Member[] }) {
   const t = useT();
-  const projects = useProjectsList();
+  // Archived projects keep their access, so they stay manageable here.
+  const projects = useProjectsList({ includeArchived: true });
   const [sharing, setSharing] = useState<ID | null>(null);
   const active = members.filter((m) => !m.suspended);
   if (!projects.length) return <div className="py-10 text-center text-[13px] text-fg-3">{t('people.noProjects')}</div>;
@@ -601,6 +602,7 @@ function ProjectsAccess({ members }: { members: Member[] }) {
               <div className="truncate text-[12.5px] text-fg-3">
                 {t('people.nMembers', { n: withAccess.length })}
                 {limited.length > 0 && ` · ${t('people.nLimited', { n: limited.length })}`}
+                {p.archived && ` · ${t('archive.badge')}`}
               </div>
             </div>
             <span className="hidden sm:block">

@@ -3,16 +3,19 @@ import { useData } from './store';
 import { STATUS_META } from './constants';
 import type { ID, Item, Project, Ref } from './types';
 
-/** Projects in sidebar order: by group, then by position inside the group; ungrouped last. */
-export function useProjectsList(): Project[] {
+/**
+ * Projects in sidebar order: by group, then by position inside the group; ungrouped last.
+ * Archived projects are left out of day-to-day lists; access settings ask for them explicitly.
+ */
+export function useProjectsList({ includeArchived = false }: { includeArchived?: boolean } = {}): Project[] {
   const projects = useData((s) => s.projects);
   const groups = useData((s) => s.groups);
   return useMemo(() => {
     const rank = (p: Project) => (p.groupId && groups[p.groupId] ? groups[p.groupId].order : Number.MAX_SAFE_INTEGER);
     return Object.values(projects)
-      .filter((p) => !p.archived)
+      .filter((p) => includeArchived || !p.archived)
       .sort((a, b) => rank(a) - rank(b) || a.order - b.order);
-  }, [projects, groups]);
+  }, [projects, groups, includeArchived]);
 }
 
 export function useItems(projectId?: ID): Item[] {

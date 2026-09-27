@@ -149,6 +149,7 @@ export function Overview() {
               key={project.id}
               projectId={project.id}
               initial={project.brief}
+              value={project.brief}
               onChange={(blocks) => useData.getState().updateProject(project.id, { brief: blocks })}
               placeholder={t('project.briefPlaceholder')}
             />

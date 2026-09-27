@@ -151,12 +151,18 @@ export function ProjectPicker({ value, onChange, children, align, allowNone }: P
   const projects = useData((s) => s.projects);
   const options = useMemo<Option<ID | undefined>[]>(() => {
     const list: Option<ID | undefined>[] = Object.values(projects)
-      .filter((p) => !p.archived)
+      // Archived projects stay out of the list, except the one already chosen.
+      .filter((p) => !p.archived || p.id === value)
       .sort((a, b) => a.order - b.order)
-      .map((p) => ({ value: p.id, label: p.name || t('common.untitled'), icon: <PageIcon icon={p.icon} size={16} /> }));
+      .map((p) => ({
+        value: p.id,
+        label: p.name || t('common.untitled'),
+        icon: <PageIcon icon={p.icon} size={16} />,
+        hint: p.archived ? t('archive.badge') : undefined,
+      }));
     if (allowNone) list.unshift({ value: undefined, label: t('common.noProject') });
     return list;
-  }, [projects, t, allowNone]);
+  }, [projects, t, allowNone, value]);
   return (
     <PickerShell options={options} value={value} onChange={onChange} align={align} placeholder={t('prop.project')}>
       {children}

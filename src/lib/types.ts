@@ -39,6 +39,8 @@ export interface Person {
   email?: string;
   /** Optional emoji avatar instead of initials. */
   avatar?: string;
+  /** Profile photo: a small square image as a data URL (png, jpeg, webp or gif). */
+  photo?: string;
   /** Left the workspace: kept so past work still shows who did it. */
   removed?: boolean;
   access?: LocalAccess;
@@ -77,7 +79,9 @@ export interface Project {
   plane?: PlaneProjectLink;
   groupId?: ID;
   order: number;
+  /** Hidden from the sidebar, My tasks and reports, but kept with all its work and access. */
   archived?: boolean;
+  archivedAt?: ISODateTime;
   /** Who created the project; creators may delete it without being admins. */
   createdBy?: ID;
   createdAt: ISODateTime;
@@ -179,7 +183,8 @@ export interface Sprint {
   updatedAt: ISODateTime;
 }
 
-export type NotificationKind = 'assigned' | 'mention' | 'comment' | 'status' | 'sprint';
+/** `due` and `overdue` are reminders each member's browser writes for their own tasks. */
+export type NotificationKind = 'assigned' | 'mention' | 'comment' | 'status' | 'sprint' | 'due' | 'overdue';
 
 /** One entry of a person's inbox. */
 export interface AppNotification {
@@ -190,7 +195,7 @@ export interface AppNotification {
   targetKind: 'item' | 'doc' | 'project';
   targetId: ID;
   projectId?: ID;
-  /** Comment excerpt, new status or sprint name, depending on the kind. */
+  /** Comment excerpt, new status, sprint name or the due date of a reminder, depending on the kind. */
   text?: string;
   createdAt: ISODateTime;
   readAt?: ISODateTime;
@@ -347,6 +352,8 @@ export interface Prefs {
   favorites: Ref[];
   recent: (Ref & { at: ISODateTime })[];
   expanded: Record<string, boolean>;
+  /** Due date reminders in the inbox. On unless turned off. */
+  reminders?: boolean;
 }
 
 export interface Workspace {

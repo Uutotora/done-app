@@ -24,8 +24,19 @@ import { useUI, toast } from '@/lib/ui';
 import { useLang, useT, type TKey } from '@/lib/i18n';
 import { useViewState } from '@/lib/viewState';
 import { useFileDrop, useHotkey } from '@/lib/hooks';
-import { defaultLinkName, domainOf, fileCategory, folderPath, linkService, looksLikeUrl, normalizeUrl, uniqueName, uploadFiles } from '@/lib/files';
-import { getFileBlob, getFileUrl } from '@/lib/storage';
+import {
+  defaultLinkName,
+  domainOf,
+  fileCategory,
+  folderPath,
+  linkService,
+  looksLikeUrl,
+  normalizeUrl,
+  uniqueName,
+  uploadErrorText,
+  uploadFiles,
+} from '@/lib/files';
+import { getFileBlob, getFileUrl, onFileStored } from '@/lib/storage';
 import { deleteNodesWithUndo } from '@/lib/actions';
 import { formatShortDate } from '@/lib/dates';
 import { useProjectsList } from '@/lib/selectors';
@@ -112,9 +123,14 @@ export function FilesView() {
   const upload = async (list: File[]) => {
     if (!list.length) return;
     setUploading((n) => n + list.length);
-    await uploadFiles(list, { projectId, parentId: folderId });
-    setUploading((n) => Math.max(0, n - list.length));
-    toast({ message: t('files.uploaded', { n: list.length }), tone: 'success' });
+    try {
+      await uploadFiles(list, { projectId, parentId: folderId });
+      toast({ message: t('files.uploaded', { n: list.length }), tone: 'success' });
+    } catch (error) {
+      toast({ message: uploadErrorText(error, t), tone: 'error' });
+    } finally {
+      setUploading((n) => Math.max(0, n - list.length));
+    }
   };
   const drop = useFileDrop((list) => void upload(list));
 
@@ -488,6 +504,7 @@ function useMoveTargets(nodeIds: ID[]): MenuEntry[] {
   const t = useT();
   const files = useData((s) => s.files);
   const projects = useProjectsList();
+  const projectsById = useData((s) => s.projects);
   const moveNodes = useData((s) => s.moveNodes);
   const first = files[nodeIds[0]];
   if (!first) return [];
@@ -515,7 +532,8 @@ function useMoveTargets(nodeIds: ID[]): MenuEntry[] {
     {
       key: 'root',
       icon: <FolderGlyph size={15} color="gray" />,
-      label: projectId ? (projects.find((p) => p.id === projectId)?.name ?? '') : t('files.workspaceDrive'),
+      // The current drive by id: an archived project's drive keeps its name here.
+      label: projectId ? (projectsById[projectId]?.name ?? '') : t('files.workspaceDrive'),
       checked: nodeIds.every((id) => !files[id]?.parentId),
       onSelect: () => moveNodes(nodeIds, undefined, projectId),
     },
@@ -666,7 +684,16 @@ function Thumb({ node }: { node: FileNode }) {
   const [url, setUrl] = useState<string>();
   const isImage = node.kind === 'file' && fileCategory(node.name, node.mime) === 'image';
   useEffect(() => {
-    if (isImage) void getFileUrl(node.id).then(setUrl);
+    if (!isImage) return;
+    let alive = true;
+    const load = () => void getFileUrl(node.id).then((next) => alive && next && setUrl(next));
+    load();
+    // With an account the card appears before its bytes finish uploading.
+    const off = onFileStored((id) => id === node.id && load());
+    return () => {
+      alive = false;
+      off();
+    };
   }, [isImage, node.id]);
   if (isImage && url) return <img src={url} alt="" draggable={false} className="h-full w-full object-cover" />;
   return (

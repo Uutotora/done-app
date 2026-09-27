@@ -174,8 +174,9 @@ export function flushWorkspace(): Promise<void> {
       const expected = revision + 1;
       base = snapshot;
       revision = result.revision;
-      // Someone else saved in between: bring their edits in right away.
-      if (result.revision !== expected) await pull();
+      // Someone else saved in between: bring their edits in right away. Forced, because the revision
+      // is already the new one and a plain pull would take the data as current.
+      if (result.revision !== expected) await pull(true, true);
       useAuth.setState({ sync: pendingChanges() ? 'saving' : 'saved', syncError: '' });
     } catch (error) {
       handleSyncError(error);
@@ -357,6 +358,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
   switch (action) {
     case 'markNotifications':
     case 'archiveNotifications':
+    case 'addReminders':
     case 'pushTrash':
     case 'restore':
       return true;
@@ -378,6 +380,7 @@ function allowedAction(action: string, args: unknown[], user: AuthUser): boolean
     case 'deleteProject':
       return isAdmin(user) || s.projects[args[0] as string]?.createdBy === user.id;
     case 'updateProject':
+    case 'setProjectArchived':
     case 'moveProject':
     case 'setMap':
     case 'createSprint':

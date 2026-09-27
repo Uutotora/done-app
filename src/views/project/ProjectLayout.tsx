@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router';
-import { Eye, MessageSquare, MoreHorizontal, Plus, Trash2, Link2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Eye, MessageSquare, MoreHorizontal, Plus, Trash2, Link2 } from 'lucide-react';
 import { useData } from '@/lib/store';
 import { useUI, toast } from '@/lib/ui';
 import { useT } from '@/lib/i18n';
-import { deleteProjectWithUndo } from '@/lib/actions';
+import { archiveProjectWithUndo, deleteProjectWithUndo, restoreArchivedProject } from '@/lib/actions';
 import { Topbar } from '@/components/Topbar';
 import { PROJECT_TABS } from '@/components/Sidebar';
 import { IconButton, Button } from '@/components/ui/Button';
@@ -12,6 +12,7 @@ import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Overlay';
 import { PageIcon } from '@/components/ui/bits';
 import { IconPicker } from '@/components/pickers/IconPicker';
 import { ProjectShareDialog } from '@/components/access/ProjectShare';
+import { ArchivedProjectBanner } from '@/components/ProjectArchive';
 import { isAdmin, useAuth, useProjectLevel } from '@/lib/auth';
 import { NotFound } from '../NotFound';
 import { cn } from '@/lib/utils';
@@ -75,6 +76,16 @@ export function ProjectLayout() {
               >
                 {t('common.copyLink')}
               </MenuItem>
+              {canEdit &&
+                (project.archived ? (
+                  <MenuItem icon={<ArchiveRestore size={15} />} onSelect={() => restoreArchivedProject(project.id)}>
+                    {t('project.unarchive')}
+                  </MenuItem>
+                ) : (
+                  <MenuItem icon={<Archive size={15} />} onSelect={() => archiveProjectWithUndo(project.id)}>
+                    {t('project.archive')}
+                  </MenuItem>
+                ))}
               {canDelete && <MenuSeparator />}
               {canDelete && (
                 <MenuItem
@@ -92,6 +103,7 @@ export function ProjectLayout() {
           </>
         }
       />
+      {project.archived && <ArchivedProjectBanner projectId={project.id} canEdit={canEdit} />}
       {!canEdit && level && (
         <div className="flex h-8 shrink-0 items-center justify-center gap-2 border-b border-line bg-subtle px-4 text-[12.5px] text-fg-3">
           {level === 'commenter' ? <MessageSquare size={13} /> : <Eye size={13} />}

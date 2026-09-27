@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import * as locales from '@blocknote/core/locales';
 import '@blocknote/mantine/style.css';
 import type { PartialBlock } from '@blocknote/core';
-import { useDebouncedCallback, useIsDark } from '@/lib/hooks';
-import { useLang } from '@/lib/i18n';
+import { useIsDark } from '@/lib/hooks';
+import { uploadErrorText } from '@/lib/files';
+import { translate, useLang } from '@/lib/i18n';
+import { MAX_INLINE_UPLOAD_MB, UploadError, isRemoteStorage, uploadEditorFile } from '@/lib/storage';
+import { toast } from '@/lib/ui';
 import { cn } from '@/lib/utils';
 import type { EditorProps } from './Editor';
-
-const MAX_INLINE_IMAGE = 3 * 1024 * 1024;
+import { useLiveContent } from './editorLive';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -20,8 +22,11 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-export default function EditorImpl({ initial, onChange, placeholder, compact, editable = true, className }: EditorProps) {
+export default function EditorImpl({ initial, onChange, placeholder, compact, editable = true, className, projectId, value }: EditorProps) {
   const lang = useLang();
+  // Read when a file is inserted, so a task moved to another project uploads there.
+  const scope = useRef(projectId);
+  scope.current = projectId;
   const dark = useIsDark();
   const dictionary = useMemo(() => {
     const base = lang === 'ru' ? locales.ru : locales.en;
@@ -31,20 +36,29 @@ export default function EditorImpl({ initial, onChange, placeholder, compact, ed
     };
   }, [lang, placeholder]);
 
+  const content = value ?? initial;
   const editor = useCreateBlockNote(
     {
-      initialContent: initial && initial.length ? (initial as PartialBlock[]) : undefined,
+      initialContent: content && content.length ? (content as PartialBlock[]) : undefined,
       dictionary,
-      // Images are stored inline so documents stay self-contained in local storage.
+      // With an account, images and files go to the server and the text keeps only their address.
+      // The local demo stores them inline, so its documents stay self-contained.
       uploadFile: async (file: File) => {
-        if (file.size > MAX_INLINE_IMAGE) throw new Error('File is too large');
-        return fileToDataUrl(file);
+        try {
+          if (isRemoteStorage()) return await uploadEditorFile(file, scope.current);
+          if (file.size > MAX_INLINE_UPLOAD_MB * 1024 * 1024) throw new UploadError('too_large', MAX_INLINE_UPLOAD_MB);
+          return await fileToDataUrl(file);
+        } catch (error) {
+          toast({ message: uploadErrorText(error, (key, vars) => translate(lang, key, vars)), tone: 'error' });
+          throw error;
+        }
       },
     },
     [dictionary],
   );
 
-  const save = useDebouncedCallback(() => onChange(editor.document as unknown[]), 350);
+  // Saves typing and shows teammates' edits live without remounting the editor.
+  const save = useLiveContent(editor, content, onChange);
 
   return (
     <div className={cn('done-editor -mx-[54px]', compact && 'compact', className)}>
